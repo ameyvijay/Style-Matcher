@@ -3,7 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { image, apiKey, provider = "gemini", ollamaUrl = "http://localhost:11434", ollamaModel = "gemma4:e4b" } = body;
+    const { image, apiKey, provider = "gemini", ollamaUrl = "http://192.168.1.222:11434", ollamaModel = "gemma4:e4b" } = body;
 
     if (!image) {
       return new Response(JSON.stringify({ error: "No image provided" }), { status: 400 });

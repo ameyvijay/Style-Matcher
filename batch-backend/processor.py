@@ -4,6 +4,9 @@ import shutil
 import json
 import concurrent.futures
 import subprocess
+import cv2
+import numpy as np
+import plistlib
 from typing import Dict, List
 from models import BatchTarget, ProcessingStatus
 from utils import (
@@ -146,39 +149,55 @@ def _run_deduplication(workspace_dir: str, active_pool: dict) -> List[List[dict]
         clusters = [[obj] for obj in active_pool.values() if obj['status'] == ProcessingStatus.ACCEPTED]
     return clusters
 
-def set_mac_tag(filepath: str, tag_name: str, color_id: int):
-    import plistlib
+def render_opencv_enhancement(filepath: str, output_path: str):
+    """Generates a professional auto-enhanced JPG using CLAHE and color balancing."""
     try:
-        plist = [f"{tag_name}\n{color_id}"]
-        plist_data = plistlib.dumps(plist, fmt=plistlib.FMT_BINARY)
-        subprocess.run(["xattr", "-w", "com.apple.metadata:_kMDItemUserTags", plist_data, filepath], check=False)
+        if filepath.lower().endswith('.arw'):
+            from utils import get_arw_thumbnail_bytes
+            thumb = get_arw_thumbnail_bytes(filepath)
+            if not thumb: return False
+            nparr = np.frombuffer(thumb, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        else:
+            img = cv2.imread(filepath)
+
+        if img is None: return False
+
+        # --- Premium AI-Style Enhancement Logic ---
+        # 1. LAB conversion for Luminance-specific processing
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+
+        # 2. CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # This opens up shadows and controls highlights without looking "fake"
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        cl = clahe.apply(l)
+
+        # 3. Subtle Vibrancy Boost (Chrominance amplification)
+        # We slightly expand the 'a' and 'b' ranges
+        a = cv2.convertScaleAbs(a, alpha=1.1, beta=0)
+        b = cv2.convertScaleAbs(b, alpha=1.1, beta=0)
+
+        # 4. Merge and re-normalize
+        enhanced_lab = cv2.merge((cl, a, b))
+        final_bgr = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+
+        # 5. High-quality export
+        cv2.imwrite(output_path, final_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        return True
     except Exception as e:
-        pass
+        print(f"Enhancement error for {filepath}: {e}")
+        return False
 
-def write_xmp_sidecar(filepath: str, stars: int):
-    try:
-        base, _ = os.path.splitext(filepath)
-        xmp_path = base + ".xmp"
-        xmp_content = f'''<x:xmpmeta xmlns:x="adobe:ns:meta/">
- <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-  <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/">
-   <xmp:Rating>{stars}</xmp:Rating>
-  </rdf:Description>
- </rdf:RDF>
-</x:xmpmeta>'''
-        with open(xmp_path, "w") as f:
-            f.write(xmp_content)
-    except Exception:
-        pass
-
-def mock_core_image_enhancement(filepath: str):
-    """Mocks generating an _enhanced.jpg natively using Apple CoreImage equivalent math"""
+def _generate_enhanced_proxy(filepath: str):
+    """Generates an _enhanced.jpg natively using OpenCV CLAHE engine"""
     try:
         base, _ = os.path.splitext(filepath)
         enhanced_path = base + "_enhanced.jpg"
-        with open(enhanced_path, "w") as f:
-            f.write("mock enhanced proxy")
-        set_mac_tag(enhanced_path, "Accepted_AI_Enhanced", 2)
+        
+        success = render_opencv_enhancement(filepath, enhanced_path)
+        if success:
+            set_mac_tag(enhanced_path, "Accepted_AI_Enhanced", 2)
     except Exception:
         pass
 
@@ -193,7 +212,7 @@ def _tag_and_enhance_processed_file(item: dict, request: BatchTarget, stats: dic
             set_mac_tag(file_path, "Accepted", 2) # Green
             write_xmp_sidecar(file_path, 5)
             stats["accepted"] += 1
-            mock_core_image_enhancement(file_path)
+            _generate_enhanced_proxy(file_path)
             
         elif status == ProcessingStatus.REVIEW_NEEDED:
             set_mac_tag(file_path, "Review_Needed", 5) # Yellow

@@ -1,3 +1,4 @@
+import VersionBadge from "../components/VersionBadge";
 import "./globals.css";
 
 export const metadata = {
@@ -14,6 +15,7 @@ export default function RootLayout({ children }) {
           <div className="blob blob-2"></div>
         </div>
         {children}
+        <VersionBadge />
       </body>
     </html>
   );

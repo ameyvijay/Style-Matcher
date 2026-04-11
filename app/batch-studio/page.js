@@ -36,8 +36,8 @@ export default function BatchStudio() {
             const currentOllamaUrl = localStorage.getItem("ollama_url") || "http://host.docker.internal:11434";
             const currentOllamaModel = localStorage.getItem("ollama_model") || "gemma4:e4b";
 
-            // Native CORS safe call to the Dockerized Python engine resolving at 8000
-            const backendUrl = "http://localhost:8000/api/batch-process";
+            // Use the globally configured backend URL from environment variables
+            const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000") + "/api/batch-process";
             
             const response = await fetch(backendUrl, {
                 method: "POST",

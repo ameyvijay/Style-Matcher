@@ -10,14 +10,14 @@ import SettingsPanel from "../components/SettingsPanel";
 export default function LandingPage() {
   const [provider, setProvider] = useState("gemini");
   const [geminiKey, setGeminiKey] = useState("");
-  const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
+  const [ollamaUrl, setOllamaUrl] = useState("http://192.168.1.222:11434");
   const [ollamaModel, setOllamaModel] = useState("gemma4:e4b");
   const [benchmarkFolder, setBenchmarkFolder] = useState("");
 
   useEffect(() => {
     setProvider(localStorage.getItem("ai_provider") || "gemini");
     setGeminiKey(localStorage.getItem("gemini_key") || "");
-    setOllamaUrl(localStorage.getItem("ollama_url") || "http://localhost:11434");
+    setOllamaUrl(localStorage.getItem("ollama_url") || "http://192.168.1.222:11434");
     setOllamaModel(localStorage.getItem("ollama_model") || "gemma4:e4b");
     setBenchmarkFolder(localStorage.getItem("benchmark_folder") || "");
   }, []);
