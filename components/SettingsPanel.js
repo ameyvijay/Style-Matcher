@@ -91,17 +91,51 @@ export default function SettingsPanel({
 
         <hr style={{ margin: "1rem 0", borderColor: "var(--glass-border)" }} />
         
-        <InputGroup label="Global Benchmark Directory" icon={Folder} description="Universal aesthetic baseline for Style Matching and Batch Processing.">
-          <input 
-            type="text"
-            className="input" 
-            placeholder="/Users/Amey/Desktop/MyBestPhotos" 
-            value={benchmarkFolder}
-            onChange={(e) => {
-              setBenchmarkFolder(e.target.value);
-              saveSettings('benchmark_folder', e.target.value);
-            }}
-          />
+        <InputGroup label="Global Benchmark Directory" icon={Folder} description="Universal aesthetic baseline for Style Matching and Batch Processing. Drag a folder here to auto-fill.">
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <input 
+              type="text"
+              className="input" 
+              placeholder="/Users/shivamagent/Desktop/MyBestPhotos" 
+              value={benchmarkFolder}
+              onChange={(e) => {
+                setBenchmarkFolder(e.target.value);
+                saveSettings('benchmark_folder', e.target.value);
+              }}
+              onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent-hover)'; }}
+              onDragLeave={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--glass-border)'; }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.currentTarget.style.borderColor = 'var(--glass-border)';
+                // MacOS Drag-and-Drop to text input is native, 
+                // but we add this handler just to ensure it captures if the OS doesn't paste automatically.
+              }}
+              style={{ flex: 1 }}
+            />
+            <button 
+              type="button"
+              className="btn btn-secondary"
+              style={{ padding: "0 1rem" }}
+              title="Browse Folder"
+              onClick={async () => {
+                try {
+                  const res = await fetch("http://192.168.1.222:8000/api/pick-folder");
+                  if (!res.ok) {
+                    const errData = await res.json();
+                    console.log("Folder picker:", errData.detail);
+                    return;
+                  }
+                  const data = await res.json();
+                  setBenchmarkFolder(data.path);
+                  saveSettings('benchmark_folder', data.path);
+                } catch (err) {
+                  console.error("Folder picker failed:", err);
+                }
+              }}
+            >
+              <Folder size={18} />
+            </button>
+          </div>
         </InputGroup>
       </div>
     </div>

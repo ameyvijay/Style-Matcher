@@ -1,125 +1,187 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { ArrowLeft, Folder, Loader2, Play, CheckCircle, BrainCircuit, XCircle, FileWarning } from "lucide-react";
-import ReactMarkdown from 'react-markdown';
+import React, { useState, useEffect } from "react";
+import { 
+  Folder, Play, CheckCircle, XCircle, AlertCircle, 
+  Loader2, Trash2, FileWarning, Search, ChevronRight 
+} from "lucide-react";
+import ReactMarkdown from "react-markdown";
 
 export default function BatchStudio() {
     const [targetFolder, setTargetFolder] = useState("");
     const [benchmarkFolder, setBenchmarkFolder] = useState("");
-    
     const [isProcessing, setIsProcessing] = useState(false);
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);
-    const [apiKey, setApiKey] = useState("");
 
+    // Persist benchmark folder from global settings if available
     useEffect(() => {
-        const key = localStorage.getItem("gemini_api_key") || localStorage.getItem("gemini_key");
-        if (key) setApiKey(key);
-        const benchStr = localStorage.getItem("benchmark_folder");
-        if (benchStr) setBenchmarkFolder(benchStr);
+        const saved = localStorage.getItem("benchmark_dir");
+        if (saved) setBenchmarkFolder(saved);
+        
+        const lastTarget = localStorage.getItem("last_target_dir");
+        if (lastTarget) setTargetFolder(lastTarget);
     }, []);
+
+    const handleFolderPicker = async (setter, key) => {
+        try {
+            const res = await fetch("http://192.168.1.222:8000/api/pick-folder");
+            if (!res.ok) {
+                const errData = await res.json();
+                console.log("Folder picker:", errData.detail);
+                return;
+            }
+            const data = await res.json();
+            setter(data.path);
+            if (key) localStorage.setItem(key, data.path);
+        } catch (err) {
+            console.error("Folder picker failed:", err);
+        }
+    };
 
     const runBatch = async () => {
         if (!targetFolder) {
-            setError("You must provide an absolute path for the Target Folder.");
+            setError("Please specify a target folder.");
             return;
         }
-
-        setIsProcessing(true);
-        setError(null);
-        setResults(null);
         
-        try {
-            const currentProvider = localStorage.getItem("ai_provider") || "gemini";
-            const currentOllamaUrl = localStorage.getItem("ollama_url") || "http://host.docker.internal:11434";
-            const currentOllamaModel = localStorage.getItem("ollama_model") || "gemma4:e4b";
+        setError(null);
+        setIsProcessing(true);
+        setResults(null);
+        localStorage.setItem("last_target_dir", targetFolder);
 
-            // Use the globally configured backend URL from environment variables
-            const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000") + "/api/batch-process";
-            
-            const response = await fetch(backendUrl, {
+        try {
+            const response = await fetch("http://192.168.1.222:8000/api/batch-process", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    target_folder: targetFolder.trim(),
-                    benchmark_folder: benchmarkFolder.trim() || null,
-                    api_key: apiKey || null,
-                    provider: currentProvider,
-                    ollama_url: currentOllamaUrl,
-                    ollama_model: currentOllamaModel
+                    target_folder: targetFolder,
+                    benchmark_folder: benchmarkFolder
                 })
             });
-            
-            const data = await response.json();
-            
+
             if (!response.ok) {
-                throw new Error(data.detail || "Backend Processing Error");
+                const errData = await response.json();
+                throw new Error(errData.detail || "Processing failed");
             }
-            
+
+            const data = await response.json();
             setResults(data);
         } catch (err) {
-            setError(err.message || "Ensure the Docker container is running and port 8000 is exposed.");
+            setError(err.message);
         } finally {
             setIsProcessing(false);
         }
     };
 
+    const runScan = async () => {
+        if (!targetFolder) {
+            setError("Please specify a target folder.");
+            return;
+        }
+        
+        setError(null);
+        setIsProcessing(true);
+        setResults(null);
+        localStorage.setItem("last_target_dir", targetFolder);
+
+        try {
+            const response = await fetch("http://192.168.1.222:8000/api/scan", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    target_folder: targetFolder,
+                })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || "Scan failed");
+            }
+
+            const data = await response.json();
+            setResults(data);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const onDrop = (e, setter) => {
+        e.preventDefault();
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+            // Note: In Chrome/Edge, this is often a relative path. 
+            // The user should paste absolute paths for the Mac Mini backend.
+            console.log("File dropped:", files[0]);
+        }
+    };
+
     return (
-        <main className="container" style={{ padding: "4rem 2rem" }}>
-            <div style={{ marginBottom: "2rem" }}>
-                <Link href="/" className="btn btn-secondary" style={{ padding: "0.5rem 1rem" }}>
-                    <ArrowLeft size={16} /> Back to Dashboard
-                </Link>
-            </div>
+        <main className="container" style={{ padding: "2rem", maxWidth: "1000px" }}>
+            <div className="glass-panel" style={{ padding: "3rem", display: "flex", flexDirection: "column", gap: "2rem" }}>
+                <header style={{ textAlign: "center", marginBottom: "1rem" }}>
+                    <h1 style={{ fontSize: "2.5rem", fontWeight: "800", background: "linear-gradient(to right, #fff, #888)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                        Antigravity Batch Studio
+                    </h1>
+                    <p style={{ color: "var(--text-secondary)", marginTop: "0.5rem" }}>
+                        AI Photo Culling & Enhancement Engine v2.0
+                    </p>
+                </header>
 
-            <div style={{ textAlign: "center", marginBottom: "3rem" }}>
-                <h1 style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "0.75rem" }}>
-                    <BrainCircuit size={40} color="var(--accent-base)" />
-                    AI Batch Studio & Photo Coach
-                </h1>
-                <p>Run massive offline parallel processing logic analyzing EXIFs, OpenCV optics, and aesthetic algorithms to auto-cull your worst photos natively.</p>
-            </div>
-
-            <div className="glass-panel" style={{ padding: "3rem", display: "flex", flexDirection: "column", gap: "2rem", maxWidth: "800px", margin: "0 auto" }}>
-                
                 {error && (
-                    <div style={{ padding: "1rem", backgroundColor: "rgba(255,50,50,0.1)", border: "1px solid rgba(255,50,50,0.3)", borderRadius: "8px", color: "#ff8888", display: "flex", gap: "1rem", alignItems: "center" }}>
-                        <XCircle size={24} /> {error}
+                    <div className="error-box" style={{ padding: "1rem", borderRadius: "8px", background: "rgba(255,0,0,0.1)", border: "1px solid rgba(255,0,0,0.3)", display: "flex", gap: "1rem", alignItems: "center", color: "#ff8888" }}>
+                        <AlertCircle /> {error}
                     </div>
                 )}
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                    <label style={{ fontWeight: "bold", fontSize: "1.2rem", display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                        <Folder size={20} color="var(--accent-hover)"/>
-                        Target Directory Path (Absolute)
+                <div className="input-group" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: "600" }}>
+                        <Folder size={18} /> Target Directory Path (Absolute)
                     </label>
-                    <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginTop: "-0.5rem" }}>
-                        Example: <code>/Users/Amey/Desktop/MyPhotos</code>
+                    <div style={{ display: "flex", gap: "1rem" }}>
+                        <input 
+                            type="text" 
+                            className="input-field"
+                            placeholder="Example: /Users/shivamagent/Desktop/MyPhotos"
+                            value={targetFolder}
+                            onChange={(e) => setTargetFolder(e.target.value)}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => onDrop(e, setTargetFolder)}
+                            style={{ flex: 1 }}
+                        />
+                        <button 
+                            className="btn btn-secondary" 
+                            onClick={() => handleFolderPicker(setTargetFolder, "last_target_dir")}
+                            title="Browse Folder"
+                        >
+                            <Folder size={20} />
+                        </button>
+                    </div>
+                    <p style={{ fontSize: "0.75rem", color: "#888", fontStyle: "italic" }}>
+                        <strong>Pro-Tip:</strong> Grab any folder in Finder and <strong>drop it directly</strong> into the box above to capture the path.
                     </p>
-                    <input 
-                        type="text" 
-                        value={targetFolder}
-                        onChange={(e) => setTargetFolder(e.target.value)}
-                        placeholder="/Absolute/Path/To/Your/Directory"
-                        style={{ padding: "1rem", borderRadius: "8px", background: "rgba(0,0,0,0.3)", border: "1px solid var(--glass-border)", color: "#fff", width: "100%", fontSize: "1rem" }}
-                    />
                 </div>
 
                 {!isProcessing && !results && (
-                    <button onClick={runBatch} className="btn btn-primary" style={{ padding: "1.2rem", fontSize: "1.2rem", display: "flex", justifyContent: "center", marginTop: "1rem" }}>
-                        <Play size={22} fill="white" /> Execute AI Batch Engine
-                    </button>
+                    <div style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}>
+                        <button onClick={runScan} className="btn btn-secondary" style={{ padding: "1.2rem", fontSize: "1.1rem", display: "flex", justifyContent: "center", flex: 1, border: "1px solid rgba(255,255,255,0.2)" }}>
+                            🔍 Scan Only (Read-Only)
+                        </button>
+                        <button onClick={runBatch} className="btn btn-primary" style={{ padding: "1.2rem", fontSize: "1.1rem", display: "flex", justifyContent: "center", flex: 1 }}>
+                            <Play size={22} fill="white" /> Execute Full Pipeline
+                        </button>
+                    </div>
                 )}
 
                 {isProcessing && (
                     <div style={{ padding: "2rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem", border: "1px solid var(--glass-border)", borderRadius: "12px", background: "rgba(0,0,0,0.2)" }}>
                         <Loader2 className="loader" size={48} color="var(--accent-hover)" />
-                        <h3>Secure Culling Engine Running...</h3>
+                        <h3>Antigravity Engine Processing...</h3>
                         <p style={{ color: "var(--text-secondary)", textAlign: "center" }}>
-                            Transpiling RAW data streams. Evaluating perceptual block hashes for duplicates.<br/>
-                            Running OpenCV Laplacian operators to detect out-of-focus optics...
+                            Extracting previews → Scoring quality (Sharpness + Aesthetics + Exposure)<br/>
+                            → Developing RAW files → Enhancing keepers → Generating AI coaching report...
                         </p>
                     </div>
                 )}
@@ -128,38 +190,119 @@ export default function BatchStudio() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "2rem", animation: "fadeIn 0.5s ease-out" }}>
                         <div style={{ display: "flex", padding: "1rem", background: "rgba(0,255,100,0.1)", border: "1px solid rgba(0,255,100,0.3)", borderRadius: "8px", gap: "1rem", alignItems: "center", color: "#aaffaa" }}>
                             <CheckCircle size={30} /> 
-                            <span style={{ fontSize: "1.2rem", fontWeight: "600" }}>Directory Processing Concluded Succesfully</span>
+                            <span style={{ fontSize: "1.2rem", fontWeight: "600" }}>Antigravity Engine v2.0 — Completed in {results.metrics?.processing_time || 0}s</span>
                         </div>
 
+                        {/* Tier Breakdown Cards */}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "1rem" }}>
+                            <div className="glass-panel" style={{ padding: "1.2rem", textAlign: "center", borderLeft: "3px solid #4ade80" }}>
+                                <div style={{ fontSize: "2rem", fontWeight: "800", color: "#4ade80" }}>{results.metrics?.portfolio || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.3rem" }}>🏆 Portfolio</div>
+                            </div>
+                            <div className="glass-panel" style={{ padding: "1.2rem", textAlign: "center", borderLeft: "3px solid #facc15" }}>
+                                <div style={{ fontSize: "2rem", fontWeight: "800", color: "#facc15" }}>{results.metrics?.keepers || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.3rem" }}>✅ Keeper</div>
+                            </div>
+                            <div className="glass-panel" style={{ padding: "1.2rem", textAlign: "center", borderLeft: "3px solid #fb923c" }}>
+                                <div style={{ fontSize: "2rem", fontWeight: "800", color: "#fb923c" }}>{results.metrics?.review || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.3rem" }}>🔍 Review</div>
+                            </div>
+                            <div className="glass-panel" style={{ padding: "1.2rem", textAlign: "center", borderLeft: "3px solid #f87171" }}>
+                                <div style={{ fontSize: "2rem", fontWeight: "800", color: "#f87171" }}>{results.metrics?.culled || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.3rem" }}>❌ Culled</div>
+                            </div>
+                            <div className="glass-panel" style={{ padding: "1.2rem", textAlign: "center", borderLeft: "3px solid #a78bfa" }}>
+                                <div style={{ fontSize: "2rem", fontWeight: "800", color: "#a78bfa" }}>{results.metrics?.recoverable || 0}</div>
+                                <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: "0.3rem" }}>🔧 Recoverable</div>
+                            </div>
+                        </div>
+
+                        {/* Processing Stats */}
                         <div className="grid-2">
                             <div className="glass-panel" style={{ padding: "1.5rem", background: "rgba(255,255,255,0.05)" }}>
-                                <h3>Data Metrics</h3>
+                                <h3>Processing Summary</h3>
                                 <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "1rem" }}>
-                                    <li><strong>Total Scanned:</strong> {results.metrics.total_scanned}</li>
-                                    <li style={{ color: "#aaffaa" }}><strong>Accepted & Moved:</strong> {results.metrics.accepted}</li>
-                                    <li style={{ color: "#ff8888" }}><strong>Duplicates Destroyed:</strong> {results.metrics.rejected_duplicates}</li>
-                                    <li style={{ color: "#ff8888" }}><strong>Blur Out-of-Focus Rejected:</strong> {results.metrics.rejected_blur}</li>
+                                    <li><strong>Total Scanned:</strong> {results.metrics?.total_scanned || 0}</li>
+                                    {results.mode !== "scan_only" && (
+                                        <li style={{ color: "#aaffaa" }}><strong>Enhanced Master JPEGs:</strong> {results.metrics?.enhanced || 0}</li>
+                                    )}
+                                    {results.mode !== "scan_only" && (
+                                        <li style={{ color: "#88ccff" }}><strong>AI Denoised:</strong> {results.metrics?.denoised || 0}</li>
+                                    )}
+                                    <li style={{ color: "#ff8888" }}><strong>{results.mode === "scan_only" ? "Would Cull:" : "Moved to /Rejected:"}</strong> {results.metrics?.culled || 0}</li>
+                                    {(results.metrics?.recoverable || 0) > 0 && (
+                                        <li style={{ color: "#a78bfa" }}><strong>🔧 Recoverable:</strong> {results.metrics?.recoverable} <em>(sharp but poorly exposed)</em></li>
+                                    )}
                                 </ul>
                             </div>
                             
-                            <div className="glass-panel" style={{ padding: "1.5rem", background: "rgba(255,255,255,0.05)" }}>
-                                <h3>File System Status</h3>
-                                <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginTop: "1rem", lineHeight: 1.6 }}>
-                                    The script safely performed file system operations directly formatting your explicit directory. 
-                                    Valid formats successfully bypassed the physical barriers and landed in <code>/Creatively edited by AI</code>.
-                                    Failed architectures landed in <code>/Rejected</code>.
-                                </p>
-                            </div>
+                            {/* Scan mode: show file listing by tier */}
+                            {results.mode === "scan_only" && results.file_listing && (
+                                <div className="glass-panel" style={{ padding: "1.5rem", background: "rgba(255,255,255,0.05)" }}>
+                                    <h3>📋 File Listing by Tier</h3>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "1rem", fontSize: "0.9rem", fontFamily: "monospace" }}>
+                                        {results.file_listing.portfolio?.length > 0 && (
+                                            <div>
+                                                <div style={{ color: "#4ade80", fontWeight: "700", marginBottom: "0.3rem" }}>🏆 PORTFOLIO ({results.file_listing.portfolio.length}) — Enhance these:</div>
+                                                {results.file_listing.portfolio.map((f, i) => <div key={i} style={{ paddingLeft: "1.5rem", color: "#ccc" }}>{f}</div>)}
+                                            </div>
+                                        )}
+                                        {results.file_listing.keeper?.length > 0 && (
+                                            <div>
+                                                <div style={{ color: "#facc15", fontWeight: "700", marginBottom: "0.3rem" }}>✅ KEEPER ({results.file_listing.keeper.length}) — Enhance these:</div>
+                                                {results.file_listing.keeper.map((f, i) => <div key={i} style={{ paddingLeft: "1.5rem", color: "#ccc" }}>{f}</div>)}
+                                            </div>
+                                        )}
+                                        {results.file_listing.review?.length > 0 && (
+                                            <div>
+                                                <div style={{ color: "#fb923c", fontWeight: "700", marginBottom: "0.3rem" }}>🔍 REVIEW ({results.file_listing.review.length}) — Worth a second look:</div>
+                                                {results.file_listing.review.map((f, i) => <div key={i} style={{ paddingLeft: "1.5rem", color: "#ccc" }}>{f}</div>)}
+                                            </div>
+                                        )}
+                                        {results.file_listing.recoverable?.length > 0 && (
+                                            <div>
+                                                <div style={{ color: "#a78bfa", fontWeight: "700", marginBottom: "0.3rem" }}>🔧 RECOVERABLE ({results.file_listing.recoverable.length}) — Sharp, needs post-work:</div>
+                                                {results.file_listing.recoverable.map((f, i) => <div key={i} style={{ paddingLeft: "1.5rem", color: "#ccc" }}>{f}</div>)}
+                                            </div>
+                                        )}
+                                        {results.file_listing.cull?.length > 0 && (
+                                            <div>
+                                                <div style={{ color: "#f87171", fontWeight: "700", marginBottom: "0.3rem" }}>❌ CULL ({results.file_listing.cull.length}):</div>
+                                                {results.file_listing.cull.map((f, i) => <div key={i} style={{ paddingLeft: "1.5rem", color: "#888" }}>{f}</div>)}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <p style={{ fontSize: "0.8rem", color: "#888", marginTop: "1.5rem", fontStyle: "italic", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "0.8rem" }}>
+                                        💡 Move Portfolio + Keeper files to a new folder and run <strong>Execute Full Pipeline</strong> on it.
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Batch mode: show output locations */}
+                            {results.mode !== "scan_only" && (
+                                <div className="glass-panel" style={{ padding: "1.5rem", background: "rgba(255,255,255,0.05)" }}>
+                                    <h3>Output Locations</h3>
+                                    <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginTop: "1rem", lineHeight: 1.6 }}>
+                                        📂 <strong>/Enhanced/</strong> — Master JPEGs developed from keepers<br/>
+                                        📂 <strong>/Rejected/</strong> — Culled photos (moved, not deleted)<br/>
+                                        📄 <strong>batch_report.json</strong> — AI Coach telemetry for LLM ingestion
+                                    </p>
+                                    <p style={{ fontSize: "0.8rem", color: "#888", marginTop: "1rem", fontStyle: "italic", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "0.8rem" }}>
+                                        Original RAW/JPEG files remain 100% untouched in the source folder.
+                                    </p>
+                                </div>
+                            )}
                         </div>
 
-                        {results.coaching_report && (
+                        {/* AI Coach Report */}
+                        {results.batch_coaching && (
                             <div className="glass-panel" style={{ padding: "2rem", border: "1px solid var(--accent-hover)" }}>
                                 <h2 style={{ display: "flex", gap: "0.75rem", alignItems: "center", marginBottom: "1rem" }}>
-                                    <FileWarning size={28} color="#FFD700" /> AI Coach Assessment (Sony a6400)
+                                    <FileWarning size={28} color="#FFD700" /> AI Photography Coach
                                 </h2>
-                                <div style={{ lineHeight: "1.8", color: "var(--text-secondary)" }}>
-                                    <ReactMarkdown>{results.coaching_report}</ReactMarkdown>
-                                </div>
+                                <pre style={{ lineHeight: "1.8", color: "var(--text-secondary)", whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "0.95rem" }}>
+                                    {results.batch_coaching}
+                                </pre>
                             </div>
                         )}
                         
