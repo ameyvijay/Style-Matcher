@@ -1,6 +1,6 @@
 {
   "name": "style-matcher",
-  "version": "1.3.0-M4-Native",
+  "version": "2.1.0-M4-Native",
   "private": true,
   "scripts": {
     "dev": "next dev",

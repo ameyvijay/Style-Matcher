@@ -53,3 +53,6 @@ __pycache__/
 .antigravity_benchmark.json
 *.log
 
+
+# backups
+.legacy/

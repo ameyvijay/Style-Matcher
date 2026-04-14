@@ -1,0 +1,11 @@
+# Remote Indexing Exclusions
+node_modules/
+.next/
+out/
+build/
+.legacy/
+.DS_Store
+*.log
+batch-backend-v2/.venv/
+playwright-report/
+test-results/

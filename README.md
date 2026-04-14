@@ -1,68 +1,100 @@
-# AI Image Workbench & Batch Studio
+# Antigravity Engine (v2.1.0) 🚀
 
-An enterprise-grade, offline-capable Digital Asset Management (DAM) suite built specifically for dynamic photographic styling, high-precision background removal, and massive autonomous offline batch processing natively invoking local OpenCV and LLM/Vision endpoints.
+**The Professional AI Image Workbench & Batch Studio for macOS.**
 
-## 🚀 Overview
-
-The system operates across a completely decoupled Docker architecture consisting of two primary components:
-1. **Frontend UI Node**: A Next.js (16.2.2) reactive glass-morphic interface handling global environment states (Ollama Local endpoints / Gemini Cloud endpoints) securely.
-2. **Backend Engine**: A Python (FastAPI/Uvicorn) pipeline heavily optimized with `opencv-python-headless` and `imagehash`. It executes structural perceptual duplicate detection and mathematically sorts images autonomously, securely breaking out of the container bounds to generate AI Coaching feedback strings.
+Antigravity is a privacy-first, professional-grade suite for photographers. It streamlines aesthetic grading, high-precision background removal, and massive autonomous batch processing by leveraging **Native macOS M4 Acceleration** and **Multi-modal AI**.
 
 ---
 
-## 🛑 Prerequisites
+## ✨ Features at a Glance
 
-Before installing the workbench, you must meet the following hardware/software requirements mathematically:
-1. **Docker Desktop**: The architecture runs autonomously inside a secure container to prevent polluting your global packages. You must have [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and actively running on your host machine.
-2. **Ollama (Optional but Recommended)**: If you desire 100% offline security, install [Ollama](https://ollama.com/) locally to evaluate your photo configurations.
+- **Native M4 Image Engine**: Bypasses virtualization to leverage Apple Silicon's Core Image and Accelerate frameworks directly.
+- **RAW+JPEG Synchronization**: Intelligent "Pairing" logic that protects high-potential RAW negatives when their JPEG counterparts are identified as keepers.
+- **Aesthetic AI Coaching**: Real-time scoring using **NIMA (Neural Image Assessment)** to mathematically assess composition and color harmony.
+- **Non-Destructive Metadata Labeling**: Generates industry-standard **XMP sidecars** and **macOS Finder Color Tags** without altering a single pixel of your original masters.
+- **Privacy-First (Local LLM)**: Full integration with **Ollama** for offline AI analysis.
 
 ---
 
-## 🛠 Installation Playbook
+## 🗺 User Journey: The Photographer's Workflow
 
-Because the system is thoroughly containerized natively, installation universally boils down to a single master command!
+1.  **Ingestion & Staging**: Connect your SD card and point the **Batch Studio** to your target directory.
+2.  **AI Scoping**: The engine executes a "pre-flight scan" to identify RAW+JPEG pairs and extract Technical/Aesthetic metrics.
+3.  **Tier Reconciliation**: The engine automatically "elevates" RAW files to the **Keeper** tier if the corresponding JPEG is scored highly by the AI.
+4.  **Metadata Tagging**: The engine writes **XMP sidecars** for Lightroom/Capture One and applies native **Green/Yellow/Red tags** in Finder.
+5.  **AI Studio Refinement**: Open individual "Keepers" in the **Live Preview Canvas** to fine-tune the AI-suggested grade.
+6.  **XMP Export**: Your folder is now a fully culled professional catalog, ready for any industry-standard editor.
 
-### Step 1: Open the Project
-Open your Terminal and navigate directly into the root folder containing the `docker-compose.yml` file.
+---
 
-### Step 2: Build the Container System
-Execute the global Docker instantiation command. This compiles both the `web` and `backend` images seamlessly:
-```bash
-docker compose up -d --build
+## 🛠 Engineering Flow Chart
+
+The following diagram illustrates the internal end-to-end logic of the **Antigravity Batch Engine (v2.1.0)**:
+
+```mermaid
+graph TD
+    A[Input Directory] --> B{Pre-Scanner}
+    B -->|Identify Sets| C[RAW+JPEG Pairing]
+    B -->|Singletons| D[Individual Processing]
+    
+    C --> E[Technical Analysis: Laplacian/BRISQUE]
+    D --> E
+    
+    E --> F[Aesthetic Analysis: Google NIMA]
+    F --> G[Metadata Aggregator]
+    
+    G --> H{Tier Reconciliation}
+    H -->|JPEG = Keeper| I[Elevate RAW to Keeper]
+    H -->|Below Threshold| J[Mark as Reject/Review]
+    
+    I --> K[DAM Layer: XMP Generation]
+    J --> K
+    
+    K --> L[Native macOS Tagging: xattr]
+    L --> M[AI Coach: reasoning String]
+    
+    M --> N[Catalog Ready for Lightroom/Finder]
 ```
-*(Note: If you run into `command not found` on a Mac despite having Docker Desktop open, ensure you map your binaries by executing: `export PATH=$PATH:/Applications/Docker.app/Contents/Resources/bin` first).*
-
-### Step 3: Verify the Status
-Wait for the daemon layers to compile! Once it finishes, you should see:
-- `Container style-matcher-backend-1 Started`
-- `Container style-matcher-web-1 Started`
 
 ---
 
-## 🖥 Usage Guide
+## 🚀 Getting Started (Native Installation)
 
-### 1. Accessing the Dashboard
-Open your local browser to **http://localhost:3001**.
-You will see the global Next.js interface!
+Native M4 optimization requires zero Docker setup.
 
-### 2. Configuration Parameters
-Directly on the homepage, scroll specifically down to **Global AI Settings**:
-- Select whether you want to use **Gemini (Cloud)** or **Ollama (Local)**.
-- Paste your API key or configure your `Ollama Default Model URL` exactly as `http://host.docker.internal:11434` (This network structure is required for the Docker container to seamlessly contact your local Mac hardware out of the sandbox).
+### 1. Prerequisites
+- **macOS 14+** (Sonoma or later)
+- **Apple Silicon** (M1, M2, M3, or M4)
+- **Ollama** (Optional for offline coaching)
 
-### 3. Assign your Benchmark Directory
-Pass the literal absolute path of your best curated edited photos (e.g., `/Users/Amey/Desktop/MyBestPhotos`) to the **Global Benchmark Directory** field on the settings page!
-- *What this does:* When the Backend processes files, it securely hashes an AI representation array of your specific benchmark folder into a secret `.antigravity_benchmark.json` file protecting your CPU against repetitive metadata abstractions seamlessly!
+### 2. Installation
+Clone the repository and install dependencies natively:
+```bash
+npm install
+cd batch-backend-v2
+pip install -r requirements.txt
+```
 
-### 4. Running the Batch Studio
-Navigate to the **AI Batch Studio**. 
-- Simply provide the absolute path mapping dynamically to any folder holding your un-curated RAWs or JPGs.
-- Click **Execute AI Batch Engine**.
-- The script uses 1:1 volume mounts structurally enabling the system to evaluate your native Mac folders directly! It mathematically isolates blurry files via **Laplacian Operations** and creates `[Creatively edited by AI]` and `[Rejected]` folders flawlessly.
+### 3. Launching the Engine
+On your primary Mac machine, start the backend processing service:
+```bash
+bash start.sh
+```
+Then, in a separate terminal, launch the Antigravity dashboard:
+```bash
+npm run dev
+```
+
+---
+
+## ⚖️ Technical Specifications
+- **Frontend**: Next.js 15+ (App Router), Lucide Icons, Glassmorphic CSS.
+- **Backend API**: FastAPI (Python 3.12+), Uvicorn.
+- **AI/Vision**: Core Image, Accelerate, Google NIMA (via PyTorch/TensorFlow), Zero-DCE.
+- **Metadata Management**: `pyexiv2` for XMP, `xattr` for macOS native tags.
 
 ---
 
 ## 💡 Troubleshooting
-
-- **"Target folder could not be mapped locally"**: Ensure the path you passed dynamically is typed as an exact absolute path matching exactly where your folders sit locally (e.g., `/Users/your_name/Downloads/folder`).
-- **Ollama Fails to Respond**: Ensure the Ollama App is physically running in your background tray and the model name you typed in Settings (e.g., `gemma4:e4b`) exists locally (run `ollama list` in terminal to confirm availability).
+- **"Finder tags not appearing"**: Ensure the target folder is on a locally mounted APFS/HFS+ drive. External network drives (SMB) may not support native macOS tagging.
+- **"Ollama Connection Refused"**: Ensure the Ollama app is running in your menu bar and your model URL is set correctly in settings.

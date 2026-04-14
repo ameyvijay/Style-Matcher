@@ -65,7 +65,8 @@ The "Enterprise" arm of the application, optimized for non-destructive high-volu
 - **Milestone 1**: Monolithic Backend & Basic React Dashboard.
 - **Milestone 2**: Modular Backend Refactoring (Extraction of Models/Utils/Processor).
 - **Milestone 3**: Frontend UI Componentization (InputGroups/ToolCards/SettingsPanels).
-- **Milestone 4 (Current)**: Transition to V2 Non-Destructive DAM Architecture & Metadata Tagging.
+- **Milestone 4**: Transition to V2 Non-Destructive DAM Architecture & Metadata Tagging. (Completed)
+- **Milestone 5**: Native M4 Image Engine stabilization & RAW+JPEG Synchronization. (Current)
 
 ---
 

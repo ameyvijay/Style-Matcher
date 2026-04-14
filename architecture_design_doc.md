@@ -1,66 +1,66 @@
-# Technical Design Document: AI Batch Image Studio
+# Technical Design Document: Antigravity Engine (v2.1.0)
 
 ## 1. System Architecture Overview
 
-The AI Batch Image Studio operates on a completely decoupled **Microservices Architecture** hosted inside a local Docker network sandbox. It bridges web-based configurations dynamically with native machine-level python binaries.
+The Antigravity Engine operates as a **Native macOS Orchestration Layer**, bridging the React-based frontend with local Python processing services. Specifically optimized for **Apple Silicon (M4/M4 Pro)**, the architecture bypasses containerization (Docker) to directly leverage hardware acceleration for image processing.
 
-### Microservice Orchestration
-- **Service A (Frontend):** `Next.js 16.2.2 (Turbopack)` wrapped natively in a `node:20-alpine` environment exposed on port `3001`. Handles all State, user configurations, and visual feedback mapping.
-- **Service B (Backend):** `Python 3.10-slim` wrapper operating a `FastAPI` instance exposed on port `8000`. Acts as the powerhouse executing OpenCV binary matrices, perceptual hashes, and File I/O operations without crushing the Node.js event loop.
-- **Hypervisor Networking:** Both engines communicate seamlessly via internal REST requests over `localhost`. 
-
----
-
-## 2. File Systems & Volume Mounting
-
-To execute logic against local Mac files without uploading gigabytes of `.ARW` (RAW) formats into the container memory dynamically, we execute a **1:1 Strict Absolute Bind Mount** inside `docker-compose.yml`:
-```yaml
-volumes:
-  - /Users/Amey:/Users/Amey
-```
-When the Frontend sends a string indicating `/Users/Amey/Desktop/Directory`, the Python container physically intercepts that *exact* identical native path mapping natively, preventing massive memory duplication.
-
-> [!TIP]
-> **Delta Architecture (Incremental States)** 
-> The system is heavily idempotent. It scans the dynamic directory for existing `Creatively edited by AI` and `Rejected` folders. If a file exists in the destination node, `main.py` explicitly issues a `continue` operator, mapping around it. This natively supports dumping new SD card fragments consecutively without breaking or executing duplicate compute!
+### Native Orchestration
+- **Frontend:** `Next.js 15+` running as a native Node.js process. It handles user state, global configurations, and the AI Batch Studio dashboard.
+- **Backend:** `Python 3.12+ (FastAPI)` running natively on the host machine. It executes high-performance image analysis and metadata operations using macOS Core Image and Accelerate frameworks.
+- **Inter-process Communication:** Managed via local HTTP REST requests (`localhost:8000`), allowing the frontend to trigger massive parallel batch operations without UI blocking.
 
 ---
 
-## 3. Computer Vision Constraints (OpenCV)
+## 2. RAW+JPEG Synchronization (The "Pairing" Layer)
 
-Relying on LLMs to visually filter images locally is incredibly taxing on RAM. The engine offloads visual diagnostics natively to pure Mathematical Logic pipelines using `cv2`:
+Professional photography workflows often result in "pairs" (e.g., `DSC_001.ARW` and `DSC_001.JPG`). Version 2.1.0 introduces intelligent grouping logic to handle these consistently.
 
-### Blur Rejection Algorithm
-- **Mechanism:** `Variance of the Laplacian`.
-- **Logic:** The image is natively pushed down to greyscale to isolate pure pixel bounds avoiding color abstraction. `cv2.Laplacian(gray, cv2.CV_64F).var()` executes a fast-fourier variance. Low variance heavily indicates a lack of edge detection (out-of-focus blur).
+### Basename Grouping Logic
+On directory ingestion, the engine executes a pre-scan to identify and group files by their base name. 
+1. **Normalization**: `DSC_001.ARW` and `DSC_001.JPG` are mapped to the identity `DSC_001`.
+2. **Metadata Merging**: Technical EXIF data from the RAW master is combined with the aesthetic rendering of the JPEG for a more complete AI context.
 
-### Structure Deduplication
-- **Mechanism:** Block Hashing (Perceptual Hashes).
-- **Logic:** Executed via the `imagehash` library. Bypasses metadata spoofing or file manipulation. It assigns hexadecimal boundaries; matching hashes immediately triggers a file rejection avoiding duplicates.
-
----
-
-## 4. The AI Configurations and Networks
-
-### Benchmark Abstract Vector DB (`.antigravity_benchmark.json`)
-Processing huge reference constraints continuously is inefficient. 
-- On first execution, the backend extracts the reference metrics natively.
-- It caches these metrics invisibly inside the source directory as `.antigravity_benchmark.json`.
-- All subsequent runs directly bypass the entire `benchmark` folder checking logic entirely, deserializing the vector graph locally.
-
-### Local Ollama Tunneling (`host.docker.internal:11434`)
-Because Ollama operates as a native macOS daemon, trying to hit `localhost:11434` inside a Docker container strictly bounces back natively inside the container itself.
-- **Escape Route:** The Next.js frontend pushes the `http://host.docker.internal:11434` environment string logically into the Python REST query. 
-- **Execution:** Python utilizes a synchronous `urllib.request` payload, tunneling precisely out of its Docker isolation onto the native Mac IP tables to process the Photo Coaching Report offline using `gemma4` or `llava` interchangeably. 
+### Tier Reconciliation (Elevation)
+To prevent accidental culling of high-utility files:
+- **Rule**: If a JPEG is classified as a **Keeper**, its RAW counterpart is automatically elevated to **Keeper** status, regardless of its individual AI aesthetic score.
+- **Rationale**: RAW files often appear "flat" or "lifeless" to standard AI vision models, but contain the most data for post-processing. Elevation ensures the photographer keeps the data they need for the shots they like.
 
 ---
 
-## 5. Metadata Mapping Strategy (XMP & EXIF)
+## 3. Computer Vision & AI Quality Assessment (NR-IQA)
 
-> [!WARNING]
-> **RAW Image Laws**  
-> We never systematically "edit" or alter `.ARW` bytes directly. 
+The engine offloads visual diagnostics to a dual-layer No-Reference Image Quality Assessment (NR-IQA) pipeline.
 
-Our AI diagnostics function entirely on extracted string metadata (`exifread`) filtering out thousands of irrelevant EXIF tags dynamically and trapping exactly the **Exposure Triangle** markers (`EXIF ISOSpeedRatings`, `EXIF ExposureTime`, `EXIF FNumber`, `EXIF FocalLength`). 
+### Technical Assessment
+- **Mechanism**: Laplacian Variance (Blur Detection) + Luminance Histogram (Exposure Check).
+- **Tooling**: OpenCV (`cv2`) and NumPy.
 
-We pass this highly condensed JSON block directly to the LLM. Synthesizing these text matrices forces the offline `gemma4` mathematical AI to accurately deduce physical light behavior significantly faster than running multi-modal Base64 visual encoding!
+### Aesthetic Assessment
+- **Mechanism**: **NIMA (Neural Image Assessment)** and **BRISQUE**.
+- **Model**: Custom-trained CNNs analyze color harmony, composition, and framing to assign an "Aesthetic Score" out of 10.
+
+---
+
+## 4. Metadata Mapping & Non-Destructive DAM
+
+### XMP Sidecar Strategy
+The engine utilizes industry-standard **XMP Sidecar files** for all culling decisions.
+- **Format**: Tiny XML files (e.g., `DSC_001.xmp`) sitting next to the original files.
+- **Compatibility**: Automatically recognized by Adobe Lightroom, Capture One, and Darktable.
+- **Safety**: Zero risk of corrupting the original master RAW files.
+
+### macOS Finder Integration (The "Tagging" Layer)
+For instant visual culling directly in Finder, the engine writes **macOS Extended Attributes (`xattr`)** to assign color tags:
+- **Green**: Highly Recommended (Keeper)
+- **Yellow**: Borderline (Review)
+- **Red/No Tag**: Rejected
+
+---
+
+## 5. Security & Privacy
+
+### Model Context Protocol (MCP)
+The engine integrates with the Antigravity session via MCP, allowing for secure tool execution on local files while preserving user-defined privacy boundaries.
+
+### Local LLM Tunneling (Ollama)
+For 100% offline analysis, the system targets the local Ollama daemon (`localhost:11434`) to generate the **AI Coach** coaching reports, ensuring that no image binary ever hits an external cloud provider unless explicitly enabled (e.g., Google Gemini).
