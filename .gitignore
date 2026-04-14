@@ -42,6 +42,7 @@ next-env.d.ts
 
 # python
 batch-backend/venv/
+batch-backend-v2/.venv/
 __pycache__/
 *.py[cod]
 *$py.class
