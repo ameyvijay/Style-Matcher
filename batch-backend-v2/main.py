@@ -14,8 +14,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi.staticfiles import StaticFiles
 from models import BatchRequest, BatchResult
 import batch_orchestrator
+import firebase_bridge
 
 
 # ─── Startup / Shutdown ──────────────────────────────────────────────
@@ -33,13 +35,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend on any port
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Mount static media folders
+# /rlhf-media points to the batch-local "For RLHF input" directory
+# This allows the PWA to pull images if they are hosted on the same network
+# (Firebase Storage is the primary path for cross-network access)
+app.mount("/rlhf-media", StaticFiles(directory="/Users/shivamagent/Desktop/Style-Matcher"), name="rlhf-media")
 
 
 # ─── Health Check ────────────────────────────────────────────────────
