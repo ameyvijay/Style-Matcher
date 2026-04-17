@@ -11,12 +11,8 @@ export default function Navigation() {
   useEffect(() => {
     // Determine if we are running locally (Mac Mini) or on a remote device (Vercel)
     const hostname = window.location.hostname;
-    // Localhost bounds
-    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.")) {
-      setIsLocal(true);
-    } else {
-      setIsLocal(false);
-    }
+    const isVercel = hostname.includes("vercel.app");
+    setIsLocal(!isVercel);
   }, []);
 
   const toggleMenu = () => setIsOpen(!isOpen);

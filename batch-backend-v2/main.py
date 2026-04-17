@@ -11,8 +11,9 @@ import os
 import subprocess
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 import json
 from fastapi.staticfiles import StaticFiles
@@ -238,53 +239,47 @@ async def scan_only(request: BatchRequest):
     }
 
 
-# ─── Batch Processing ───────────────────────────────────────────────
+# ─── Stop Batch ────────────────────────────────────────────────────
+@app.post("/api/stop-batch")
+async def stop_batch(session_id: str = "default"):
+    """Request the engine to stop the current batch session."""
+    batch_orchestrator.ABORT_REGISTRY.add(session_id)
+    return {"status": "stop_requested", "session_id": session_id}
+
+
+# ─── Batch Processing (Streaming) ──────────────────────────────────
+@app.get("/api/batch-process-stream")
+async def batch_process_stream(
+    target_folder: str, 
+    benchmark_folder: str = None, 
+    session_id: str = "default"
+):
+    """
+    Execute the batch pipeline and stream real-time JSON logs.
+    """
+    return StreamingResponse(
+        batch_orchestrator.stream_batch(target_folder, benchmark_folder, session_id),
+        media_type="text/event-stream"
+    )
+
+
+# ─── Batch Processing (Legacy Sync) ─────────────────────────────────
 @app.post("/api/batch-process")
 async def batch_process(request: BatchRequest):
     """
-    Run the full batch processing pipeline on a folder.
-    Returns structured results with per-file assessments and coaching.
+    Legacy endpoint that now just drains the stream and returns the final result.
     """
+    # For now, we'll keep it simple for compatibility
     if not os.path.isdir(request.target_folder):
-        return {
-            "status": "error",
-            "message": f"Folder not found: {request.target_folder}",
-        }
+        return {"status": "error", "message": f"Folder not found: {request.target_folder}"}
+    
+    # We'll just call the streamer and collect the last 'done' event
+    final_result = {}
+    for event_str in batch_orchestrator.stream_batch(request.target_folder, request.benchmark_folder):
+        event = json.loads(event_str.strip())
+        if event["type"] == "done":
+            final_result = event["data"]
+            break
+            
+    return {"status": "success", "metrics": final_result}
 
-    result = batch_orchestrator.run_batch(
-        target_folder=request.target_folder,
-        benchmark_folder=request.benchmark_folder,
-    )
-
-    return {
-        "status": "success",
-        "metrics": {
-            "total_scanned": result.total_scanned,
-            "portfolio": result.portfolio,
-            "keepers": result.keepers,
-            "review": result.review,
-            "culled": result.culled,
-            "recoverable": result.recoverable,
-            "duplicates": result.duplicates,
-            "denoised": result.denoised,
-            "enhanced": result.enhanced,
-            "processing_time": result.processing_time,
-        },
-        "batch_coaching": result.batch_coaching,
-        "assessments": [
-            {
-                "filename": a.filename,
-                "tier": a.tier,
-                "score": a.composite_score,
-                "sharpness": a.sharpness_score,
-                "aesthetic": a.aesthetic_score,
-                "exposure": a.exposure_score,
-                "reasoning": a.reasoning,
-                "flaws": a.technical_flaws,
-                "recovery_potential": a.recovery_potential,
-                "recovery_notes": a.recovery_notes,
-                "enhanced_path": a.enhanced_path,
-            }
-            for a in result.files
-        ],
-    }
