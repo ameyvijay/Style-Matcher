@@ -60,3 +60,6 @@ __pycache__/
 # databases
 *.db
 *.sqlite3
+
+# firebase secrets
+firebase-service-account.json
