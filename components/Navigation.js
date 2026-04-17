@@ -12,8 +12,17 @@ export default function Navigation() {
   useEffect(() => {
     // Determine if we are running locally
     const hostname = window.location.hostname;
-    const isVercel = hostname.includes("vercel.app");
-    setIsLocal(!isVercel);
+    
+    const isLocalAddress = 
+      hostname === "localhost" || 
+      hostname === "127.0.0.1" || 
+      hostname.endsWith(".local") || 
+      hostname.startsWith("192.168.") || 
+      hostname.startsWith("10.0.");
+
+    // Even if accessed via Vercel, if we can reach the local backend on 8000, 
+    // it's likely the person is on the Mac Mini itself.
+    setIsLocal(isLocalAddress);
 
     // Initial check
     checkEngine();
