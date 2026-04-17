@@ -2,18 +2,36 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Menu, X, Lock, Unlock, Image, Camera, Activity, Settings, LayoutDashboard } from "lucide-react";
+import { Menu, X, Lock, Unlock, Image, Camera, Activity, Settings, LayoutDashboard, CheckCircle } from "lucide-react";
 
 export default function Navigation() {
   const [isOpen, setIsOpen] = useState(false);
   const [isLocal, setIsLocal] = useState(false);
+  const [engineOnline, setEngineOnline] = useState(false);
 
   useEffect(() => {
-    // Determine if we are running locally (Mac Mini) or on a remote device (Vercel)
+    // Determine if we are running locally
     const hostname = window.location.hostname;
     const isVercel = hostname.includes("vercel.app");
     setIsLocal(!isVercel);
+
+    // Initial check
+    checkEngine();
+    
+    // Heartbeat polling
+    const timer = setInterval(checkEngine, 10000);
+    return () => clearInterval(timer);
   }, []);
+
+  const checkEngine = async () => {
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${baseUrl}/api/health`, { cache: 'no-store' });
+      setEngineOnline(res.ok);
+    } catch (e) {
+      setEngineOnline(false);
+    }
+  };
 
   const toggleMenu = () => setIsOpen(!isOpen);
 
@@ -100,9 +118,12 @@ export default function Navigation() {
           );
         })}
 
-        <div style={{ marginTop: "auto", padding: "1rem", background: "rgba(0,0,0,0.3)", borderRadius: "8px", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+        <div style={{ marginTop: "auto", padding: "1rem", background: "rgba(0,0,0,0.3)", borderRadius: "8px", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem", color: "var(--text-secondary)", borderLeft: engineOnline ? "3px solid #4ade80" : "none" }}>
           {isLocal ? <Unlock size={14} color="#4ade80" /> : <Lock size={14} color="#f87171" />}
-          {isLocal ? "Local Compute Engine" : "Cloud Remote (Read-Only)"}
+          <div style={{ flex: 1 }}>
+            {isLocal ? "Local Compute Engine" : "Cloud Remote (Read-Only)"}
+          </div>
+          {engineOnline && <CheckCircle size={14} color="#4ade80" />}
         </div>
       </div>
 
