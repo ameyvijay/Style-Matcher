@@ -205,9 +205,33 @@ def _save_with_pillow_polish(
     pil_img = ImageEnhance.Color(pil_img).enhance(profile.color_boost)
     pil_img = ImageEnhance.Sharpness(pil_img).enhance(profile.sharpness_boost)
 
+    # Respect max resolution scale if set
+    if profile.max_resolution_scale < 1.0:
+        w, h = pil_img.size
+        pil_img = pil_img.resize((int(w * profile.max_resolution_scale), int(h * profile.max_resolution_scale)), Image.LANCZOS)
+
     # Save as high-quality JPEG
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    pil_img.save(output_path, "JPEG", quality=profile.jpeg_quality, optimize=True)
+    
+    # Initial save
+    quality = profile.jpeg_quality
+    pil_img.save(output_path, "JPEG", quality=quality, optimize=True)
+    
+    # Recursive down-sizing if max_file_size_mb is set and exceeded
+    if profile.max_file_size_mb > 0:
+        current_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        attempts = 0
+        while current_size_mb > profile.max_file_size_mb and attempts < 5:
+            attempts += 1
+            quality = int(quality * 0.9) # Reduce quality by 10%
+            if quality < 60: # If quality is too low, reduce resolution instead
+                w, h = pil_img.size
+                pil_img = pil_img.resize((int(w * 0.8), int(h * 0.8)), Image.LANCZOS)
+                quality = 85 # Reset quality to a reasonable level
+            
+            pil_img.save(output_path, "JPEG", quality=quality, optimize=True)
+            current_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+            print(f"[image_enhancer] Size {current_size_mb:.1f}MB > {profile.max_file_size_mb}MB. Reduced to quality={quality}, attempt={attempts}")
 
 
 # ─── Stage C: Real-ESRGAN AI Super-Resolution ────────────────────────

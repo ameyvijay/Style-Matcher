@@ -14,10 +14,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import json
 from fastapi.staticfiles import StaticFiles
 from models import BatchRequest, BatchResult
 import batch_orchestrator
 import firebase_bridge
+from database import SessionLocal, Media, Inference, Annotation, ModelRegistry
 
 
 # ─── Startup / Shutdown ──────────────────────────────────────────────
@@ -33,6 +35,16 @@ app = FastAPI(
     version="2.0.0",
     description="AI Photography Culling & Enhancement Engine",
     lifespan=lifespan,
+)
+
+# ─── CORS Middleware ────────────────────────────────────────────────
+# Allow Next.js PWA (running on Vercel or locally) to hit the Ngrok tunnel
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount static media folders
@@ -93,6 +105,65 @@ async def pick_folder():
         return {"path": None, "error": "Dialog timed out"}
     except Exception as e:
         return {"path": None, "error": str(e)}
+
+
+# ─── Analytics Dashboard ──────────────────────────────────────────
+@app.get("/api/analytics")
+async def get_analytics():
+    """Return Cohen's Kappa, Precision, Recall, F1 against Local DB."""
+    db = SessionLocal()
+    try:
+        annotations = db.query(Annotation).order_by(Annotation.id.asc()).all()
+        human_truth = {}
+        for ann in annotations:
+            # Overwrite with latest annotation per media_id
+            human_truth[ann.media_id] = ann.action 
+
+        inferences = db.query(Inference).all()
+        model_predictions = {}
+        for inf in inferences:
+            try:
+                data = json.loads(inf.inference_value)
+                is_keeper = data.get("tier") in ["portfolio", "keeper"]
+                model_predictions[inf.media_id] = "swipe_right_keeper" if is_keeper else "swipe_left_cull"
+            except:
+                pass
+
+        tp, fp, tn, fn = 0, 0, 0, 0
+        for media_id, actual in human_truth.items():
+            predicted = model_predictions.get(media_id)
+            if not predicted: continue
+            
+            if predicted == "swipe_right_keeper" and actual == "swipe_right_keeper":
+                tp += 1
+            elif predicted == "swipe_right_keeper" and actual == "swipe_left_cull":
+                fp += 1
+            elif predicted == "swipe_left_cull" and actual == "swipe_left_cull":
+                tn += 1
+            elif predicted == "swipe_left_cull" and actual == "swipe_right_keeper":
+                fn += 1
+                
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+        total_processed = db.query(Media).count()
+        total_accepted = list(human_truth.values()).count("swipe_right_keeper")
+        total_rejected = list(human_truth.values()).count("swipe_left_cull")
+
+        return {
+            "stats": {
+                "total": total_processed,
+                "accepted": total_accepted,
+                "rejected": total_rejected,
+                "rescued": fn,
+                "precision": precision,
+                "recall": recall,
+                "f1": f1
+            }
+        }
+    finally:
+        db.close()
 
 
 # ─── Scan Only (Read-Only) ──────────────────────────────────────────

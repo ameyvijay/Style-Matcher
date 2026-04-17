@@ -22,11 +22,12 @@ import time
 import tempfile
 from pathlib import Path
 
+from typing import Any
 from models import (
-    BatchRequest, BatchResult, FileResult, ImageAssessment,
+    ImageAssessment, BatchResult,
     QualityScore, Tier, TIER_CONFIG,
     IMAGE_EXTENSIONS, NEEDS_CONVERSION, get_format_type,
-    SelfTestResult,
+    SelfTestResult, ENHANCEMENT_PROFILE_MASTER, ENHANCEMENT_PROFILE_RLHF
 )
 
 # Import all modules
@@ -36,6 +37,11 @@ import raw_developer
 import image_enhancer
 import file_tagger
 import ai_coach
+import hashlib
+import json
+from database import SessionLocal, Media, Inference, ModelRegistry
+from firebase_bridge import FirebaseBridge
+from diversity_sampler import DiversitySampler
 
 
 # ─── Main Batch Processing ───────────────────────────────────────────
@@ -72,10 +78,11 @@ def run_batch(
     # Create output directories
     enhanced_dir = os.path.join(target_folder, "Enhanced")
     rejected_dir = os.path.join(target_folder, "Rejected")
+    rlhf_input_dir = os.path.join(target_folder, "For RLHF input")
     workspace_dir = os.path.join(target_folder, ".antigravity_workspace")
-    os.makedirs(enhanced_dir, exist_ok=True)
-    os.makedirs(rejected_dir, exist_ok=True)
-    os.makedirs(workspace_dir, exist_ok=True)
+    
+    for d in [enhanced_dir, rejected_dir, rlhf_input_dir, workspace_dir]:
+        os.makedirs(d, exist_ok=True)
 
     # Scan for images and group by stem (basename)
     # RAW+JPEG pairs (e.g., DSC001.ARW and DSC001.JPG) share the same stem.
@@ -115,6 +122,20 @@ def run_batch(
     print(f"📂 Enhanced: {enhanced_dir}")
     print(f"📂 Rejected: {rejected_dir}")
     print(f"{'='*60}\n")
+
+    # Initialize Semantic Analyst
+    analyst = quality_classifier._get_vision_analyst()
+    
+    # Initialize DB Session
+    db = SessionLocal()
+    
+    # Ensure Laplacian model exists in registry
+    model_name = "laplacian_v2" # Using default for now
+    model_record = db.query(ModelRegistry).filter(ModelRegistry.name == model_name).first()
+    if not model_record:
+        model_record = ModelRegistry(name=model_name, model_type="heuristics", is_production=True)
+        db.add(model_record)
+        db.commit()
 
     # Process each group
     assessments: list[ImageAssessment] = []
@@ -192,16 +213,29 @@ def run_batch(
                 enhanced_path = ""
                 tag_filepath = filepath
                 
-                # Route based on reconciled tier
+                # MLOps: Hash the file to track it immutably
+                file_hash = hashlib.sha256(f"{filename}_{os.path.getsize(filepath)}".encode()).hexdigest()
+                
+                # Check absolute paths to insert/update Media record
+                media_record = db.query(Media).filter(Media.photo_hash == file_hash).first()
+                if not media_record:
+                    media_record = Media(
+                        photo_hash=file_hash,
+                        file_path=filepath,
+                        format=format_type,
+                        file_size=os.path.getsize(filepath),
+                        width=exif.get("ImageWidth"),
+                        height=exif.get("ImageLength")
+                    )
+                    db.add(media_record)
+                    db.commit() # Commit to get ID
+                
+                # Route based on reconciled tier (NO MOVING FILES)
                 if max_tier == Tier.CULL:
-                    reject_path = os.path.join(rejected_dir, filename)
-                    shutil.move(filepath, reject_path)
-                    tag_filepath = reject_path
                     result.culled += 1
                     if quality.recovery_potential in ("high", "medium"):
                         result.recoverable += 1
-                
-                else:
+                else:                     
                     # Keeper / Portfolio / Enhanced Review
                     if max_tier == Tier.REVIEW:
                         result.review += 1
@@ -209,13 +243,46 @@ def run_batch(
                         if max_tier == Tier.PORTFOLIO: result.portfolio += 1
                         else: result.keepers += 1
                     
-                    # Enhance: If this IS the RAW master, or if there is no RAW master in the group, enhance this file
+                    # RLHF Stream: Review / Keeper / Portfolio
+                    # We always generate a 90% RLHF version for these tiers
                     is_best_source = (raw_master and res == raw_master) or (not raw_master)
-                    if should_enhance and is_best_source:
-                        enhanced_path = _enhance_file(
+                    if is_best_source:
+                        # 1. RLHF Version (90% quality, capped size)
+                        rlhf_name = f"{stem}_rlhf.jpg"
+                        rlhf_path = os.path.join(rlhf_input_dir, rlhf_name)
+                        _enhance_file(
                             filepath, filename, format_type, exif.get("ISO", 0),
-                            enhanced_dir, workspace_dir, result
+                            rlhf_path, workspace_dir, result, ENHANCEMENT_PROFILE_RLHF
                         )
+                        
+                        # 2. Master Version (100% quality)
+                        enhanced_name = f"{stem}_master.jpg"
+                        enhanced_path = os.path.join(enhanced_dir, enhanced_name)
+                        _enhance_file(
+                            filepath, filename, format_type, exif.get("ISO", 0),
+                            enhanced_path, workspace_dir, result, ENHANCEMENT_PROFILE_MASTER
+                        )
+                        
+                        media_record.enhanced_path = enhanced_path
+                        db.commit()
+                        
+                # Log Inference to Database
+                inference = Inference(
+                    media_id=media_record.id,
+                    model_id=model_record.id,
+                    inference_value=json.dumps({
+                        "tier": max_tier.value,
+                        "composite": quality.composite,
+                        "sharpness": quality.sharpness,
+                        "aesthetic": quality.aesthetic,
+                        "exposure": quality.exposure,
+                        "recovery_potential": quality.recovery_potential
+                    }),
+                    confidence=1.0,
+                    processing_time_ms=quality.processing_time * 1000
+                )
+                db.add(inference)
+                db.commit()
 
                 # Tagging (using reconciled tier but individual scores)
                 file_tagger.tag_photo(
@@ -280,6 +347,25 @@ def run_batch(
     report_path = os.path.join(target_folder, "batch_report.json")
     ai_coach.save_report_json(assessments, report_path, batch_coaching, batch_time)
 
+    # ── Stage 8: RLHF Curation & Firebase Injection ──
+    sampler = DiversitySampler(target_batch_size=50)
+    rlhf_batch = sampler.curate_rlhf_batch(assessments)
+    
+    if rlhf_batch:
+        # Note: service account path and bucket are hardcoded here for simplicity, 
+        # but should ideally come from env/config.
+        bridge = FirebaseBridge(
+            "firebase-service-account.json", 
+            "style-matcher-9480d.firebasestorage.app"
+        )
+        if bridge.initialize():
+            # Update assessments with rlhf_url
+            for a in rlhf_batch:
+                rlhf_file_path = os.path.join(rlhf_input_dir, f"{Path(a.filename).stem}_rlhf.jpg")
+                a.enhanced_path = rlhf_file_path # Temporary mapping for upload
+            
+            bridge.upload_rlhf_batch(f"batch_{int(time.time())}", rlhf_batch)
+
     # Clean up workspace
     try:
         shutil.rmtree(workspace_dir, ignore_errors=True)
@@ -302,15 +388,17 @@ def run_batch(
 
 def _enhance_file(
     filepath: str, filename: str, format_type: str, iso: int,
-    enhanced_dir: str, workspace_dir: str, result: BatchResult,
+    enhanced_path: str, workspace_dir: str, result: BatchResult,
+    profile: Any = None
 ) -> str:
     """
-    Develop + enhance a single file. Returns the enhanced path or empty string.
-    Works for both RAW and JPEG/PNG/HEIC/TIFF files.
+    Develop + enhance a single file to a specific output path.
     """
     stem = os.path.splitext(filename)[0]
-    enhanced_name = f"{stem}_master.jpg"
-    enhanced_path = os.path.join(enhanced_dir, enhanced_name)
+    
+    if profile is None:
+        from models import EnhancementProfile
+        profile = EnhancementProfile()
 
     if format_type == "RAW":
         # RAW: develop first, then enhance

@@ -57,6 +57,13 @@ export default function LandingPage() {
           description="Massive backend parallel processing. Auto-cull out-of-focus RAWs and generate coaching reports." 
           icon={Folder} 
         />
+
+        <ToolCard 
+          href="/cull" 
+          title="RLHF Workspace" 
+          description="Swipe to cull. Train your local model's aesthetic intelligence in real-time." 
+          icon={Sparkles} 
+        />
       </section>
 
       <SettingsPanel 

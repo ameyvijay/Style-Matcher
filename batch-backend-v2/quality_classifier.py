@@ -25,6 +25,7 @@ import cv2
 import numpy as np
 
 from models import QualityScore, Tier, SelfTestResult, GENRE_PROFILES, detect_genre
+from vision_analyst import VisionAnalyst
 
 # ─── ML Model (Lazy Initialize) ──────────────────────────────────────
 _musiq_model = None
@@ -72,6 +73,13 @@ def _init_ml_models():
 # RAW previews from exiftool are ~1620px. JPEGs must be normalized to
 # the same resolution for fair, consistent scoring across formats.
 _CLASSIFY_MAX_DIM = 1600
+_vision_analyst = None
+
+def _get_vision_analyst():
+    global _vision_analyst
+    if _vision_analyst is None:
+        _vision_analyst = VisionAnalyst()
+    return _vision_analyst
 
 
 def classify(image_input: str | bytes, exif: dict = None) -> QualityScore:
@@ -85,6 +93,12 @@ def classify(image_input: str | bytes, exif: dict = None) -> QualityScore:
     
     Returns:
         QualityScore with sharpness, aesthetic, exposure, composite, and tier
+    """
+    return classify_with_analyst(image_input, None, exif)
+
+def classify_with_analyst(image_input: str | bytes, analyst: Optional[VisionAnalyst] = None, exif: dict = None) -> QualityScore:
+    """
+    Full classification loop including semantic analysis.
     """
     start = time.time()
 
@@ -116,6 +130,23 @@ def classify(image_input: str | bytes, exif: dict = None) -> QualityScore:
     # 3. Exposure (Histogram Analysis) — now with bimodal detection
     exposure = _compute_exposure(img)
 
+    # 4. Semantic Intelligence (Ollama + RAG)
+    # We use a temp file for vision analysis if input is bytes
+    description = ""
+    similarity = 50.0 # Default neutral
+    
+    if analyst:
+        tmp_path = None
+        if isinstance(image_input, bytes):
+            tmp_path = tempfile.mktemp(suffix=".jpg")
+            cv2.imwrite(tmp_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            description = analyst.analyze_image(tmp_path)
+            if tmp_path and os.path.exists(tmp_path): os.unlink(tmp_path)
+        else:
+            description = analyst.analyze_image(image_input)
+        
+        similarity = analyst.get_similarity_score(description)
+
     # 4. Composite Score (Genre-Aware Weighted Average)
     genre = detect_genre(exif)
     profile = GENRE_PROFILES.get(genre, GENRE_PROFILES["general"])
@@ -124,7 +155,12 @@ def classify(image_input: str | bytes, exif: dict = None) -> QualityScore:
     w_aesth = profile["aesthetic_weight"]
     w_expo = profile["exposure_weight"]
     
-    composite = (sharpness * w_sharp) + (aesthetic * w_aesth) + (exposure * w_expo)
+    # Semantic weight: Part of the aesthetic bucket
+    # We use a 70/30 split between general aesthetic and personal preference
+    # to maintain KL Divergence guardrails (Personalization < 30% total influence).
+    final_aesthetic = (aesthetic * 0.7) + (similarity * 0.3)
+    
+    composite = (sharpness * w_sharp) + (final_aesthetic * w_aesth) + (exposure * w_expo)
     tier = Tier.from_score(composite)
 
     # Recovery potential: sharp but poorly exposed/composed photos
@@ -148,6 +184,8 @@ def classify(image_input: str | bytes, exif: dict = None) -> QualityScore:
         composite=round(composite, 1),
         tier=tier,
         recovery_potential=recovery,
+        semantic_description=description,
+        semantic_similarity=similarity,
         processing_time=round(time.time() - start, 3),
     )
 

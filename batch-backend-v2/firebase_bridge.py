@@ -11,6 +11,7 @@ from google.cloud.firestore_v1.watch import Watch
 
 # Local imports
 from models import ImageAssessment, BatchResult
+from database import SessionLocal, Media, Annotation
 
 class FirebaseBridge:
     """
@@ -120,9 +121,37 @@ class FirebaseBridge:
             for change in changes:
                 if change.type.name == 'MODIFIED':
                     doc_data = change.document.to_dict()
-                    if doc_data.get('status') in ['accepted', 'rejected']:
-                        print(f"[firebase_bridge] New decision for {doc_data.get('filename')}: {doc_data.get('status')}")
-                        on_decision_callback(doc_data)
+                    status = doc_data.get('status')
+                    if status in ['accepted', 'rejected']:
+                        print(f"[firebase_bridge] New decision for {doc_data.get('filename')}: {status}")
+                        
+                        # MLOps: Write to table_annotations
+                        try:
+                            # DB session handled per callback to avoid threading issues
+                            db = SessionLocal()
+                            # Query the media
+                            media_record = db.query(Media).filter(Media.file_path == doc_data.get("original_path")).first()
+                            
+                            if media_record:
+                                action_mapping = {
+                                    'accepted': 'swipe_right_keeper',
+                                    'rejected': 'swipe_left_cull'
+                                }
+                                
+                                annotation = Annotation(
+                                    media_id=media_record.id,
+                                    user_id=doc_data.get("user_id", "guest"),
+                                    action=action_mapping.get(status, status)
+                                )
+                                db.add(annotation)
+                                db.commit()
+                                print(f"[firebase_bridge] Saved annotation to local DB for {media_record.id}")
+                            db.close()
+                        except Exception as e:
+                            print(f"[firebase_bridge] Failed to log annotation to DB: {e}")
+                        
+                        if on_decision_callback:
+                            on_decision_callback(doc_data)
 
         # Watch the 'photos' collection for decisions
         query = self.db.collection('photos').where('status', 'in', ['accepted', 'rejected'])
@@ -138,7 +167,7 @@ class FirebaseBridge:
 
 if __name__ == "__main__":
     # Self-test snippet (requires service account)
-    bridge = FirebaseBridge("firebase-service-account.json", "style-matcher-placeholder.appspot.com")
+    bridge = FirebaseBridge("firebase-service-account.json", "style-matcher-9480d.firebasestorage.app")
     if bridge.initialize():
         print("Self-test: Connection OK")
     else:

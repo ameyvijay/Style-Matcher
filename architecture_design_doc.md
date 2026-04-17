@@ -1,66 +1,66 @@
-# Technical Design Document: Antigravity Engine (v2.1.0)
+# Technical Design Document: Antigravity Engine (v2.2.0)
 
 ## 1. System Architecture Overview
+The Antigravity Engine is a **Native macOS Orchestration Layer** optimized for **Apple Silicon (M4)**. It bridges a React/Next.js frontend with local Python processing services and a mobile-first PWA feedback loop.
 
-The Antigravity Engine operates as a **Native macOS Orchestration Layer**, bridging the React-based frontend with local Python processing services. Specifically optimized for **Apple Silicon (M4/M4 Pro)**, the architecture bypasses containerization (Docker) to directly leverage hardware acceleration for image processing.
-
-### Native Orchestration
-- **Frontend:** `Next.js 15+` running as a native Node.js process. It handles user state, global configurations, and the AI Batch Studio dashboard.
-- **Backend:** `Python 3.12+ (FastAPI)` running natively on the host machine. It executes high-performance image analysis and metadata operations using macOS Core Image and Accelerate frameworks.
-- **Inter-process Communication:** Managed via local HTTP REST requests (`localhost:8000`), allowing the frontend to trigger massive parallel batch operations without UI blocking.
-
----
-
-## 2. RAW+JPEG Synchronization (The "Pairing" Layer)
-
-Professional photography workflows often result in "pairs" (e.g., `DSC_001.ARW` and `DSC_001.JPG`). Version 2.1.0 introduces intelligent grouping logic to handle these consistently.
-
-### Basename Grouping Logic
-On directory ingestion, the engine executes a pre-scan to identify and group files by their base name. 
-1. **Normalization**: `DSC_001.ARW` and `DSC_001.JPG` are mapped to the identity `DSC_001`.
-2. **Metadata Merging**: Technical EXIF data from the RAW master is combined with the aesthetic rendering of the JPEG for a more complete AI context.
-
-### Tier Reconciliation (Elevation)
-To prevent accidental culling of high-utility files:
-- **Rule**: If a JPEG is classified as a **Keeper**, its RAW counterpart is automatically elevated to **Keeper** status, regardless of its individual AI aesthetic score.
-- **Rationale**: RAW files often appear "flat" or "lifeless" to standard AI vision models, but contain the most data for post-processing. Elevation ensures the photographer keeps the data they need for the shots they like.
+### Hybrid Orchestration
+- **Local Node.js/FastAPI**: Handles massive parallel processing, RAW handling, and local VLM analysis.
+- **Cloud Bridge (Firebase)**: Provides a synchronization layer for mobile RLHF without exposing the local file system.
+- **PWA Frontend**: Mobile-optimized interface for "human-in-the-loop" decision making.
 
 ---
 
-## 3. Computer Vision & AI Quality Assessment (NR-IQA)
+## 2. Hybrid Cloud Bridge (The "Firestore" Layer)
+To enable mobile interaction without complex port forwarding or VPNs, the engine uses a specialized Firebase synchronization strategy.
 
-The engine offloads visual diagnostics to a dual-layer No-Reference Image Quality Assessment (NR-IQA) pipeline.
-
-### Technical Assessment
-- **Mechanism**: Laplacian Variance (Blur Detection) + Luminance Histogram (Exposure Check).
-- **Tooling**: OpenCV (`cv2`) and NumPy.
-
-### Aesthetic Assessment
-- **Mechanism**: **NIMA (Neural Image Assessment)** and **BRISQUE**.
-- **Model**: Custom-trained CNNs analyze color harmony, composition, and framing to assign an "Aesthetic Score" out of 10.
+### RLHF Handshake Workflow
+1. **Curate**: Backend processes a batch and selects 20 photos for RLHF based on **Diversity Sampling**.
+2. **Upload**: Photos are converted to lightweight JPEGs and uploaded to `Firebase Storage`.
+3. **Sync**: A `batch_report` document is created in `Firestore` containing image URLs, AI scores, and prediction metadata.
+4. **feedback**: User swipes on mobile; Firestore listener updates the document status to `accepted` or `rejected`.
+5. **Realize**: Local `firebase_bridge.py` detects the update, pulls the final decisions, and executes final "Master" folder creation on the Mac Mini.
 
 ---
 
-## 4. Metadata Mapping & Non-Destructive DAM
+## 3. Semantic Intelligence & RLHF logic
+The engine evolved from raw mathematical quality checks to semantic aesthetic understanding.
 
-### XMP Sidecar Strategy
-The engine utilizes industry-standard **XMP Sidecar files** for all culling decisions.
-- **Format**: Tiny XML files (e.g., `DSC_001.xmp`) sitting next to the original files.
-- **Compatibility**: Automatically recognized by Adobe Lightroom, Capture One, and Darktable.
-- **Safety**: Zero risk of corrupting the original master RAW files.
+### VLM Integration (Ollama)
+- **Model**: `llava` or `moondream` hosted locally.
+- **Role**: Provides natural language scene captions (e.g., "Silhouette at sunset with high dynamic range") used to populate the local **RAG / Vector Store**.
 
-### macOS Finder Integration (The "Tagging" Layer)
-For instant visual culling directly in Finder, the engine writes **macOS Extended Attributes (`xattr`)** to assign color tags:
-- **Green**: Highly Recommended (Keeper)
-- **Yellow**: Borderline (Review)
-- **Red/No Tag**: Rejected
+### Adaptive Quality Classifier
+- **Logic**: Combines Laplacian Blur scores with Semantic Similarity.
+- **RLHF Adaptation**: User swipes are converted into "Preference Vectors."
+- **KL Divergence Guardrails**: To prevent the model from over-fitting to a single style (e.g., only accepting sunset photos), a divergence penalty is applied if the current batch diversity deviates significantly from the global preference store history.
 
 ---
 
-## 5. Security & Privacy
+## 4. Intelligence Analytics (The "F1" Layer)
+In photo culling, Precision (not keeping bad photos) and Recall (not missing good photos) are both critical.
 
-### Model Context Protocol (MCP)
-The engine integrates with the Antigravity session via MCP, allowing for secure tool execution on local files while preserving user-defined privacy boundaries.
+### Metrics Monitoring
+- **F1 Score**: Calculated as `2 * (Precision * Recall) / (Precision + Recall)`.
+- **Precision**: How many of the AI-selected photos were swiped "Right" by the user.
+- **Recall**: How many photos in the "Rejected" bin were rescued by the user via the **Second Chance QA Bin**.
 
-### Local LLM Tunneling (Ollama)
-For 100% offline analysis, the system targets the local Ollama daemon (`localhost:11434`) to generate the **AI Coach** coaching reports, ensuring that no image binary ever hits an external cloud provider unless explicitly enabled (e.g., Google Gemini).
+---
+
+## 5. PWA & Mobile UX Specifications
+The frontend is designed for a native "App Store" feel.
+
+### Tech Stack
+- **Framework**: Next.js 15+ + `next-pwa`.
+- **Animations**: `framer-motion` for zero-latency card dragging.
+- **Auth**: Google OAuth via Firebase Client SDK.
+
+### UI Features
+- **Glassmorphism**: Backdrop blurs and translucent borders consistent with macOS design.
+- **Swipe Gestures**: High-fidelity drag physics with visual feedback (Green/Red overlays).
+- **Service Workers**: Caches high-resolution thumbnails for offline swiping.
+
+---
+
+## 6. Security & Privacy
+- **Encrypted Handshakes**: All Firestore communication is restricted via Security Rules linked to the user's UID.
+- **Temporary Storage**: RLHF photos in the cloud are treated as temporary "Handshake Proxies" and can be cleared after the local realization phase is complete.

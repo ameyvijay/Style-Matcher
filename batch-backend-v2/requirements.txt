@@ -25,10 +25,11 @@ imagededup>=0.3
 # ── macOS Finder Tags ──
 pyobjc-framework-Cocoa>=10.0
 
-# ── AI Coaching (future) ──
-google-genai
+# ── Cloud Bridge ──
+firebase-admin
 
 # ── Testing ──
 pytest
 httpx
 pytest-asyncio
+sqlalchemy

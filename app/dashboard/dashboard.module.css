@@ -1,0 +1,245 @@
+.main {
+  min-height: 100vh;
+  background-color: #000;
+  color: #fff;
+  padding: 1rem;
+}
+
+@media (min-width: 768px) {
+  .main {
+    padding: 2rem;
+  }
+}
+
+.container {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3rem;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.backBtn {
+  padding: 0.5rem;
+  border-radius: 9999px;
+  transition: background-color 0.2s;
+  color: #fff;
+}
+
+.backBtn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.title {
+  font-size: 1.875rem;
+  font-weight: 700;
+  background-image: linear-gradient(to right, #60a5fa, #a855f7, #ec4899);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin: 0;
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  margin-bottom: 3rem;
+}
+
+@media (min-width: 768px) {
+  .metricsGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .metricsGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.metricCard {
+  background-color: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  padding: 1.5rem;
+  border-radius: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.metricBlur {
+  position: absolute;
+  top: -1rem;
+  right: -1rem;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 9999px;
+  filter: blur(24px);
+  opacity: 0.2;
+}
+
+.metricHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.metricIconWrap {
+  padding: 0.75rem;
+  border-radius: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bgBlue { background-color: #3b82f6; }
+.bgGreen { background-color: #22c55e; }
+.bgPurple { background-color: #a855f7; }
+.bgRed { background-color: #ef4444; }
+.bgPink { background-color: #ec4899; }
+
+.metricTitle {
+  color: #9ca3af;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0 0 0.25rem 0;
+}
+
+.metricValue {
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.contentGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2rem;
+}
+
+@media (min-width: 1024px) {
+  .contentGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.sectionBox {
+  background-color: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  padding: 2rem;
+  border-radius: 3rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sectionTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 1.5rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.textBlue { color: #60a5fa; }
+.textGreen { color: #4ade80; }
+.textPurple { color: #c084fc; }
+.textPink { color: #f472b6; }
+.textRed { color: #f87171; }
+
+.progressRow {
+  margin-bottom: 1.5rem;
+}
+
+.progressLabelWrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.progressLabel {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.progressValue {
+  font-size: 1.5rem;
+  font-family: monospace;
+}
+
+.progressBarTrack {
+  width: 100%;
+  background-color: rgba(255, 255, 255, 0.05);
+  height: 0.5rem;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progressBarFill {
+  height: 100%;
+}
+
+.shadowGreen { box-shadow: 0 0 10px rgba(34, 197, 94, 0.5); }
+.shadowPurple { box-shadow: 0 0 10px rgba(168, 85, 247, 0.5); }
+
+.infoBox {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background-color: rgba(59, 130, 246, 0.05);
+  border-radius: 1rem;
+  border: 1px solid rgba(59, 130, 246, 0.1);
+}
+
+.infoText {
+  font-size: 0.875rem;
+  color: #93c5fd;
+  line-height: 1.625;
+  font-style: italic;
+  margin: 0;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.statItem {
+  padding: 1.5rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.statLabel {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+}
+
+.statValue {
+  font-size: 1.875rem;
+  font-family: monospace;
+  margin: 0;
+}

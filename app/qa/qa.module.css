@@ -1,0 +1,310 @@
+.main {
+  min-height: 100vh;
+  background-color: #000;
+  color: #fff;
+  padding: 1rem;
+}
+
+@media (min-width: 768px) {
+  .main {
+    padding: 2rem;
+  }
+}
+
+.container {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2.5rem;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.backBtn {
+  padding: 0.5rem;
+  border-radius: 9999px;
+  transition: background-color 0.2s;
+  color: #fff;
+}
+
+.backBtn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.title {
+  font-size: 1.875rem;
+  font-weight: 700;
+  background-image: linear-gradient(to right, #f87171, #a855f7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin: 0 0 0.25rem 0;
+}
+
+.subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  margin: 0;
+}
+
+.viewToggle {
+  display: flex;
+  gap: 0.5rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.toggleBtn {
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.toggleBtnActive {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.toggleBtnInactive {
+  color: #6b7280;
+}
+
+.loaderWrap {
+  display: flex;
+  justify-content: center;
+  padding: 5rem 0;
+}
+
+.loaderSpinner {
+  width: 3rem;
+  height: 3rem;
+  border: 4px solid #a855f7;
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+
+.gridMode {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .gridMode {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .gridMode {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.listMode {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.cardItem {
+  position: relative;
+}
+
+.cardItemList {
+  display: flex;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 1.5rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1rem;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.thumbWrap {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.thumbGrid {
+  aspect-ratio: 3 / 4;
+  border-radius: 1.5rem;
+}
+
+.thumbList {
+  width: 6rem;
+  height: 6rem;
+  border-radius: 0.75rem;
+  flex-shrink: 0;
+}
+
+.thumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.actionsOverlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+/* Equivalent to group-hover applied natively via CSS */
+.cardItem:hover .actionsOverlay {
+  opacity: 1;
+}
+
+.actionBtnCheck {
+  padding: 0.75rem;
+  background-color: #22c55e;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  border: none;
+  cursor: pointer;
+  color: white;
+}
+
+.actionBtnReset {
+  padding: 0.75rem;
+  background-color: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(12px);
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  border: none;
+  cursor: pointer;
+  color: white;
+}
+
+.actionBtnCheck:hover, .actionBtnReset:hover {
+  transform: scale(1.1);
+}
+
+.listMeta {
+  flex: 1;
+}
+
+.metaTitle {
+  font-weight: 700;
+  font-size: 1.125rem;
+  margin: 0 0 0.25rem 0;
+}
+
+.metaSubtitle {
+  font-size: 0.75rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  margin: 0;
+}
+
+.listActions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.listBtnReset {
+  padding: 0.5rem 1rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 0.75rem;
+  transition: background-color 0.2s;
+  font-size: 0.875rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+  cursor: pointer;
+  color: white;
+}
+
+.listBtnReset:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.listBtnCheck {
+  padding: 0.5rem 1rem;
+  background-color: #16a34a;
+  border-radius: 0.75rem;
+  transition: background-color 0.2s;
+  font-size: 0.875rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  border: none;
+  cursor: pointer;
+  color: white;
+}
+
+.listBtnCheck:hover {
+  background-color: #22c55e;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 5rem 0;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 3rem;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.emptyIconWrap {
+  margin-bottom: 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.emptyIconInner {
+  padding: 1.5rem;
+  background-color: rgba(239, 68, 68, 0.1);
+  border-radius: 50%;
+  color: rgba(239, 68, 68, 0.5);
+}
+
+.emptyTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 1rem 0;
+}
+
+.emptyDesc {
+  color: #9ca3af;
+  max-width: 24rem;
+  margin: 0 auto;
+}
+
+.returnBtn {
+  margin-top: 2rem;
+  display: inline-block;
+}

@@ -119,7 +119,8 @@ export default function SettingsPanel({
               title="Browse Folder"
               onClick={async () => {
                 try {
-                  const res = await fetch("http://192.168.1.222:8000/api/pick-folder");
+                  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                  const res = await fetch(`${baseUrl}/api/pick-folder`);
                   if (!res.ok) {
                     const errData = await res.json();
                     console.log("Folder picker:", errData.detail);

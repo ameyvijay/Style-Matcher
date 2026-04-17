@@ -56,3 +56,7 @@ __pycache__/
 
 # backups
 .legacy/
+
+# databases
+*.db
+*.sqlite3
