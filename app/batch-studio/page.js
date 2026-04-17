@@ -60,7 +60,16 @@ export default function BatchStudio() {
             const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
             const url = `${baseUrl}/api/batch-process-stream?target_folder=${encodeURIComponent(targetFolder)}&benchmark_folder=${encodeURIComponent(benchmarkFolder)}&session_id=${sessionId}`;
             
+            // Immediate feedback
+            setLogs([{ timestamp: Date.now()/1000, type: "sys", message: `Connecting to Antigravity Kernel at ${baseUrl}...` }]);
+            
             const response = await fetch(url);
+            
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || `Connection failed: ${response.statusText}`);
+            }
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
 
@@ -88,6 +97,7 @@ export default function BatchStudio() {
                 }
             }
         } catch (err) {
+            console.error("Batch error:", err);
             setError(err.message);
             setIsProcessing(false);
         }

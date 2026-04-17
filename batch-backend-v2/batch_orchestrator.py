@@ -60,18 +60,20 @@ def stream_batch(
     Executes the full 8-stage pipeline and yields real-time progress events.
     Supports atomic rollback if aborted via ABORT_REGISTRY.
     """
+    yield _yield_log(f"Initializing Antigravity Kernel (Session: {session_id})", "sys")
+    print(f"\n🚀 Antigravity Engine v2.1 — Kernel Active (Session: {session_id})")
+
     batch_start = time.time()
     session_files: list[str] = []      # Track created files for rollback
     session_db_ids: list[int] = []     # Track Media IDs for rollback
     inference_db_ids: list[int] = []   # Track Inference IDs for rollback
     
-    db = SessionLocal()
-    
     try:
+        db = SessionLocal()
         # --- Stage 0: Initialization ---
-        yield _yield_log(f"Initializing Antigravity Kernel (Session: {session_id})", "sys")
         
         if not os.path.isdir(target_folder):
+            print(f"❌ Error: folder not found: {target_folder}")
             yield _yield_log(f"Error: folder not found: {target_folder}", "error")
             return
 
@@ -102,6 +104,8 @@ def stream_batch(
         stems = sorted(groups.keys())
         processed_count = 0
         
+        print(f"📁 Source: {target_folder}")
+        print(f"🔍 Found {len(stems)} groups ({total_files} files) to process.")
         yield _yield_log(f"Found {len(stems)} groups ({total_files} files) to process.", "sys")
 
         # Prep Model Registry
@@ -110,6 +114,8 @@ def stream_batch(
             model_record = ModelRegistry(name="laplacian_v2", model_type="heuristics", is_production=True)
             db.add(model_record)
             db.commit()
+
+        print("="*60)
 
         assessments: list[ImageAssessment] = []
         result = BatchResult(total_scanned=total_files)
@@ -166,6 +172,7 @@ def stream_batch(
                     "sharpness": round(quality.sharpness, 1),
                     "aesthetic": round(quality.aesthetic, 1)
                 })
+                print(f"[{processed_count}/{total_files}] {filename} ({res['format_type']}) → {max_tier.value.upper()} ", end="", flush=True)
 
                 try:
                     # MLOps: Hash & DB
@@ -236,8 +243,10 @@ def stream_batch(
                     assessment.recovery_potential = quality.recovery_potential
                     assessment.recovery_notes = recovery_notes
                     assessments.append(assessment)
+                    print(f"[{quality.composite:.0f}%] ✅")
 
                 except Exception as e:
+                    print(f"❌ ERROR: {e}")
                     yield _yield_log(f"⚠️ Internal error processing {filename}: {str(e)}", "error")
 
 
