@@ -15,6 +15,7 @@ import shutil
 import time
 import json
 import hashlib
+import random
 from pathlib import Path
 from typing import Any, Generator, Set
 
@@ -297,6 +298,63 @@ def stream_batch(
         shutil.rmtree(os.path.join(target_folder, ".antigravity_workspace"), ignore_errors=True)
 
 # ─── Helper Functions (Restored) ───────────────────────────────────
+
+def generate_doppler_manifest(portfolio_list: list, amber_list: list, cull_list: list, output_dir: str) -> str:
+    """
+    Mandate 4: Psychological Load Balancer (The 70/30 Dopamine Loop)
+    Interleaves known winners (Portfolio) with likely losers (Amber/Cull) 
+    in a strict 70/30 (7 accepts to 3 rejects) ratio, with stochastic jitter to avoid UI fatigue.
+    """
+    accepts = list(portfolio_list)
+    rejects = list(amber_list) + list(cull_list)
+    
+    # Pre-shuffle to avoid clustering identical consecutive traits
+    random.shuffle(accepts)
+    random.shuffle(rejects)
+    
+    interleaved_queue = []
+    
+    while accepts and rejects:
+        chunk_accepts = min(len(accepts), 7)
+        chunk_rejects = min(len(rejects), 3)
+        
+        chunk = []
+        for _ in range(chunk_accepts):
+            chunk.append(accepts.pop(0))
+        for _ in range(chunk_rejects):
+            chunk.append(rejects.pop(0))
+            
+        # Jitter: Stochastic shuffle within the 10-item micro-batch
+        random.shuffle(chunk)
+        interleaved_queue.extend(chunk)
+        
+    # Edge Case: Fallback if mathematical parity is broken
+    if accepts:
+        print(f"⚠️ Doppler Warning: 70/30 ratio broken. Appended {len(accepts)} remaining accepts.")
+        interleaved_queue.extend(accepts)
+    if rejects:
+        print(f"⚠️ Doppler Warning: 70/30 ratio broken. Appended {len(rejects)} remaining rejects.")
+        interleaved_queue.extend(rejects)
+        
+    manifest_path = os.path.join(output_dir, "batch_queue.json")
+    temp_path = f"{manifest_path}.tmp"
+    
+    manifest_data = {
+        "generated_at": time.time(),
+        "total_items": len(interleaved_queue),
+        "photos": interleaved_queue
+    }
+    
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(manifest_data, f, indent=2)
+        os.replace(temp_path, manifest_path)
+    except Exception as e:
+        print(f"❌ Failed to atomically write Doppler manifest: {e}")
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+            
+    return manifest_path
 
 def _enhance_file(filepath, filename, format_type, iso, enhanced_path, workspace_dir, result, profile) -> str:
     stem = os.path.splitext(filename)[0]

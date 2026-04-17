@@ -2,10 +2,77 @@
 
 import React, { useState, useEffect } from "react";
 import { 
-  Folder, Play, CheckCircle, XCircle, AlertCircle, 
+  Folder, Play, CheckCircle, XCircle, AlertCircle, AlertTriangle, RefreshCw, 
   Loader2, Trash2, FileWarning, Search, ChevronRight, Terminal, StopCircle, RotateCcw
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+
+import ReactMarkdown from "react-markdown";
+
+// 1. The Observability Banner Component (Glassmorphism Styled)
+const SyncAlertBanner = ({ health }) => {
+    if (!health || (health.failed_directories === 0 && health.retrying_directories === 0)) {
+        return null; // Hidden when healthy
+    }
+
+    return (
+        <div style={{ width: "100%", marginBottom: "1.5rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            {/* FAILED STATE: Frosted Red / Critical */}
+            {health.failed_directories > 0 && (
+                <div style={{ 
+                    background: "rgba(127, 29, 29, 0.4)", 
+                    backdropFilter: "blur(12px)", 
+                    border: "1px solid rgba(239, 68, 68, 0.5)", 
+                    color: "#fecaca", 
+                    padding: "1.25rem", 
+                    borderRadius: "12px", 
+                    display: "flex", 
+                    alignItems: "center", 
+                    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)" 
+                }}>
+                    <XCircle style={{ width: "24px", height: "24px", marginRight: "1rem", color: "#f87171", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                        <h3 style={{ fontWeight: "bold", color: "#fecaca", margin: 0 }}>🚨 Sync Failed: {health.failed_directories} Directories Stranded</h3>
+                        <p style={{ fontSize: "0.85rem", opacity: 0.9, margin: 0 }}>Maximum retries exceeded. Manual intervention required on the Mac Studio.</p>
+                    </div>
+                </div>
+            )}
+
+            {/* RETRYING STATE: Frosted Amber / Warning */}
+            {health.retrying_directories > 0 && (
+                <div style={{ 
+                    background: "rgba(120, 53, 15, 0.4)", 
+                    backdropFilter: "blur(12px)", 
+                    border: "1px solid rgba(245, 158, 11, 0.5)", 
+                    color: "#fef3c7", 
+                    padding: "1.25rem", 
+                    borderRadius: "12px", 
+                    display: "flex", 
+                    alignItems: "center", 
+                    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)"
+                }}>
+                    <AlertTriangle style={{ width: "24px", height: "24px", marginRight: "1rem", color: "#fbbf24", flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                        <h3 style={{ fontWeight: "bold", color: "#fef3c7", margin: 0 }}>⚠️ Stranded Masters: Tailscale Network Unreachable</h3>
+                        <p style={{ fontSize: "0.85rem", opacity: 0.9, margin: 0 }}>
+                            Retrying {health.retrying_directories} directories. Optimized with --append-verify for resumption.
+                        </p>
+                    </div>
+                    <RefreshCw className="animate-spin" style={{ width: "20px", height: "20px", marginLeft: "auto", color: "#fbbf24", opacity: 0.6 }} />
+                    <style>{`
+                        @keyframes spin {
+                            from { transform: rotate(0deg); }
+                            to { transform: rotate(360deg); }
+                        }
+                        .animate-spin {
+                            animation: spin 2s linear infinite;
+                        }
+                    `}</style>
+                </div>
+            )}
+        </div>
+    );
+};
 
 export default function BatchStudio() {
     const [targetFolder, setTargetFolder] = useState("");
@@ -13,6 +80,7 @@ export default function BatchStudio() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);
+    const [syncHealth, setSyncHealth] = useState({ failed_directories: 0, retrying_directories: 0 });
     const [logs, setLogs] = useState([]);
     const [sessionId] = useState(() => `sess_${Math.random().toString(36).substr(2, 9)}`);
     const [isRollingBack, setIsRollingBack] = useState(false);
@@ -24,6 +92,33 @@ export default function BatchStudio() {
         
         const lastTarget = localStorage.getItem("last_target_dir");
         if (lastTarget) setTargetFolder(lastTarget);
+    }, []);
+
+    // 2. The Telemetry Hook (polling loop)
+    useEffect(() => {
+        let isMounted = true;
+        const fetchSyncHealth = async () => {
+            try {
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const response = await fetch(`${baseUrl}/api/health/sync`);
+                if (!response.ok) throw new Error("Health endpoint unreachable");
+                const data = await response.json();
+                
+                if (isMounted) {
+                    setSyncHealth(data);
+                }
+            } catch (error) {
+                console.warn("Telemetry poll failed (Backend down or Tailscale offline)");
+            }
+        };
+
+        fetchSyncHealth();
+        const intervalId = setInterval(fetchSyncHealth, 10000); // 10-second polling
+
+        return () => {
+            isMounted = false;
+            clearInterval(intervalId);
+        };
     }, []);
 
     const handleFolderPicker = async (setter, key) => {
@@ -70,6 +165,8 @@ export default function BatchStudio() {
                 throw new Error(errData.detail || `Connection failed: ${response.statusText}`);
             }
 
+            /* ⚠️ SSE Elimination: Commenting out chunk reader. 
+               The frontend should now fetch batch_queue.json via useEffect.
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
 
@@ -96,6 +193,10 @@ export default function BatchStudio() {
                     }
                 }
             }
+            */
+            // Fallback: Immediate completion state for manifest-based logic
+            setLogs(prev => [...prev, { timestamp: Date.now()/1000, type: "sys", message: "Batch initiated. Check Cull screen for live progress via manifest." }]);
+            setIsProcessing(false);
         } catch (err) {
             console.error("Batch error:", err);
             setError(err.message);
@@ -168,6 +269,9 @@ export default function BatchStudio() {
                         AI Photo Culling & Enhancement Engine v2.0
                     </p>
                 </header>
+
+                {/* Mount the banner at the very top of the layout */}
+                <SyncAlertBanner health={syncHealth} />
 
                 {error && (
                     <div className="error-box" style={{ padding: "1rem", borderRadius: "8px", background: "rgba(255,0,0,0.1)", border: "1px solid rgba(255,0,0,0.3)", display: "flex", gap: "1rem", alignItems: "center", color: "#ff8888" }}>

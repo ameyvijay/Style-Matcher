@@ -6,7 +6,7 @@ import { collection, query, where, limit, onSnapshot, doc, updateDoc, increment 
 import SwipeCard from "../../components/SwipeCard";
 import AuthGuard from "../../components/AuthGuard";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, BarChart2, History, LogOut } from "lucide-react";
+import { Sparkles, BarChart2, History, LogOut, AlertCircle } from "lucide-react";
 import { signOut } from "firebase/auth";
 import Link from "next/link";
 import styles from "./cull.module.css";
@@ -14,8 +14,33 @@ import styles from "./cull.module.css";
 export default function CullPage() {
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [reviewQueue, setReviewQueue] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    const fetchQueue = async () => {
+      try {
+        const response = await fetch("/api/batch-queue");
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error("Manifest Not Found");
+          }
+          throw new Error("Failed to load batch queue");
+        }
+        const data = await response.json();
+        setReviewQueue(data);
+        setPhotos(data.photos || []);
+        setLoading(false);
+      } catch (err) {
+        console.error("Manifest load error:", err);
+        setError(err.message);
+        setLoading(false);
+      }
+    };
+
+    fetchQueue();
+
+    /* Commenting out original Firestore listener for SSE Elimination
     const q = query(
       collection(db, "photos"),
       where("status", "==", "pending"),
@@ -32,6 +57,7 @@ export default function CullPage() {
     });
 
     return () => unsubscribe();
+    */
   }, []);
 
   const handleSwipe = async (photoId, batchId, status) => {
@@ -86,33 +112,45 @@ export default function CullPage() {
 
         {/* Swipe Area */}
         <div className={styles.swipeArea}>
-          <AnimatePresence>
-            {photos.length > 0 ? (
-              photos.slice(0, 3).reverse().map((photo, index) => (
-                <SwipeCard 
-                  key={photo.id}
-                  photo={photo}
-                  onSwipe={(status) => handleSwipe(photo.id, photo.batch_id, status)}
-                />
-              ))
-            ) : (
-              !loading && (
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className={styles.emptyState}
-                >
-                  <div className={styles.emptyStateIcon}>
-                    <Sparkles size={48} />
-                  </div>
-                  <h2 className={styles.emptyStateTitle}>Queue Clear!</h2>
-                  <p className={styles.emptyStateDesc}>
-                    You've processed all pending photos. Great work!
-                  </p>
-                </motion.div>
-              )
-            )}
-          </AnimatePresence>
+          {error === "Manifest Not Found" ? (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyStateIcon} style={{ color: "#f87171" }}>
+                <AlertCircle size={48} />
+              </div>
+              <h2 className={styles.emptyStateTitle}>Manifest Not Found</h2>
+              <p className={styles.emptyStateDesc}>
+                The batch_queue.json is missing. Please restart the processing engine.
+              </p>
+            </div>
+          ) : (
+            <AnimatePresence>
+              {photos.length > 0 ? (
+                photos.slice(0, 3).reverse().map((photo, index) => (
+                  <SwipeCard 
+                    key={photo.id}
+                    photo={photo}
+                    onSwipe={(status) => handleSwipe(photo.id, photo.batch_id, status)}
+                  />
+                ))
+              ) : (
+                !loading && (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className={styles.emptyState}
+                  >
+                    <div className={styles.emptyStateIcon}>
+                      <Sparkles size={48} />
+                    </div>
+                    <h2 className={styles.emptyStateTitle}>Queue Clear!</h2>
+                    <p className={styles.emptyStateDesc}>
+                      You've processed all pending photos. Great work!
+                    </p>
+                  </motion.div>
+                )
+              )}
+            </AnimatePresence>
+          )}
           
           {loading && (
             <div className={styles.loaderOverlay}>

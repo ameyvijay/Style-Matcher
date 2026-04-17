@@ -116,6 +116,20 @@ class DatasetSnapshot(Base):
     created_at = Column(DateTime, default=func.now())
 
 
+class SyncQueue(Base):
+    """
+    Mandate 1 Durable Storage Spool: Handles isolated TrueNAS synchronization tracking.
+    """
+    __tablename__ = 'table_sync_queue'
+
+    id = Column(Integer, primary_key=True, index=True)
+    enhanced_dir_path = Column(Text, unique=True, nullable=False)
+    status = Column(String(20), default="PENDING")  # PENDING, SYNCING, COMPLETED, FAILED
+    retry_count = Column(Integer, default=0)
+    last_attempt_timestamp = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+
 def init_db():
     """Initializes the database entirely, creating tables if they don't exist."""
     print(f"Initializing database at {DATABASE_URL}")

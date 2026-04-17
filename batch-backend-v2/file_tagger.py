@@ -97,6 +97,26 @@ def set_finder_comment(filepath: str, comment: str) -> bool:
         return False
 
 
+def write_xmp_atomic(xmp_path: str, content: str) -> bool:
+    """
+    Atomically write XMP content to disk.
+    Writes to a temporary file first, then renames to the target path.
+    Mandate 3: Non-Destructive Data Integrity.
+    """
+    temp_fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(xmp_path), suffix=".tmp")
+    try:
+        with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        # Atomic replacement of the target file
+        os.replace(temp_path, xmp_path)
+        return True
+    except Exception as e:
+        print(f"[file_tagger] ATOMIC WRITE FAILED for {xmp_path}: {e}")
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        return False
+
+
 def write_xmp_sidecar(
     filepath: str,
     rating: int,
@@ -148,10 +168,7 @@ def write_xmp_sidecar(
 </x:xmpmeta>
 <?xpacket end="w"?>'''
 
-        with open(xmp_path, "w", encoding="utf-8") as f:
-            f.write(xmp_content)
-
-        return True
+        return write_xmp_atomic(xmp_path, xmp_content)
 
     except Exception as e:
         print(f"[file_tagger] XMP write error: {e}")
