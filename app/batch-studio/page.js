@@ -153,17 +153,11 @@ export default function BatchStudio() {
                             onDragOver={(e) => e.preventDefault()}
                             onDrop={(e) => onDrop(e, setTargetFolder)}
                             style={{ flex: 1 }}
+                            disabled={isProcessing}
                         />
-                        <button 
-                            className="btn btn-secondary" 
-                            onClick={() => handleFolderPicker(setTargetFolder, "last_target_dir")}
-                            title="Browse Folder"
-                        >
-                            <Folder size={20} />
-                        </button>
                     </div>
                     <p style={{ fontSize: "0.75rem", color: "#888", fontStyle: "italic" }}>
-                        <strong>Pro-Tip:</strong> Grab any folder in Finder and <strong>drop it directly</strong> into the box above to capture the path.
+                        <strong>Pro-Tip:</strong> Grab any folder in Finder and <strong>drop it directly</strong> into the box above to capture the path. (Browse dialog disabled in background worker mode).
                     </p>
                 </div>
 

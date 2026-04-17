@@ -54,6 +54,22 @@ app.add_middleware(
 app.mount("/rlhf-media", StaticFiles(directory="/Users/shivamagent/Desktop/Style-Matcher"), name="rlhf-media")
 
 
+# ─── Ollama Tags ────────────────────────────────────────────────────
+import httpx
+@app.get("/api/ollama-tags")
+async def get_ollama_tags():
+    """Proxy local ollama models to the web frontend."""
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get("http://127.0.0.1:11434/api/tags", timeout=3.0)
+            if res.status_code == 200:
+                data = res.json()
+                models = [model["name"] for model in data.get("models", [])]
+                return {"success": True, "models": models}
+    except Exception as e:
+        pass
+    return {"success": False, "models": ["gemma4:e4b"]}
+
 # ─── Health Check ────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():

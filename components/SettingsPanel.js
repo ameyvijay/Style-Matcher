@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Settings, Key, Server, Folder } from "lucide-react";
 import InputGroup from "./InputGroup";
 
@@ -16,6 +17,28 @@ export default function SettingsPanel({
   setBenchmarkFolder,
   saveSettings 
 }) {
+  const [availableModels, setAvailableModels] = useState(["gemma4:e4b"]);
+
+  useEffect(() => {
+    async function fetchModels() {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const res = await fetch(`${baseUrl}/api/ollama-tags`);
+        const data = await res.json();
+        if (data.success && data.models.length > 0) {
+          setAvailableModels(data.models);
+          // Auto-migrate to actual first model if current isn't valid
+          if (!data.models.includes(ollamaModel)) {
+            setOllamaModel(data.models[0]);
+            saveSettings('ollama_model', data.models[0]);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch Ollama models:", e);
+      }
+    }
+    if (provider === "ollama") fetchModels();
+  }, [provider]);
   return (
     <div className="glass-panel" style={{ padding: "2rem" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.5rem" }}>
@@ -75,16 +98,17 @@ export default function SettingsPanel({
            </InputGroup>
 
            <InputGroup label="Ollama Model Name" icon={Server} description="Ensure the executed model supports multimodal inputs.">
-             <input 
-               type="text"
+             <select 
                className="input" 
-               placeholder="e.g. llava, gemma4:e4b" 
                value={ollamaModel}
                onChange={(e) => {
                  setOllamaModel(e.target.value);
                  saveSettings('ollama_model', e.target.value);
                }}
-             />
+               style={{ appearance: "auto" }}
+             >
+               {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+             </select>
            </InputGroup>
            </>
         )}
