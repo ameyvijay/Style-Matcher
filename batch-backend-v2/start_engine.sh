@@ -11,6 +11,7 @@ pkill -f "ngrok http 8000" || true
 
 # 2. Boot the FastAPI Backend Engine
 source .venv/bin/activate
+export PATH="/opt/homebrew/bin:$PATH"
 export ENGINE_STATUS="online"
 nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
 
