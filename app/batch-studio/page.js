@@ -12,6 +12,9 @@ import ReactMarkdown from "react-markdown";
 const SyncAlertBanner = ({ health, apiError }) => {
     // DISCONNECTED STATE: Red / High Urgency
     if (apiError || (health && health.status === "disconnected")) {
+        const isNetworkError = apiError;
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
         return (
             <div style={{ 
                 background: "rgba(127, 29, 29, 0.4)", 
@@ -29,7 +32,12 @@ const SyncAlertBanner = ({ health, apiError }) => {
                 <div style={{ flex: 1 }}>
                     <h3 style={{ fontWeight: "bold", color: "#fecaca", margin: 0 }}>🚨 Control Plane Disconnected</h3>
                     <p style={{ fontSize: "0.85rem", opacity: 0.9, margin: 0 }}>
-                        {apiError ? "Mac Mini Local API is unreachable." : "Firestore Control Plane connection lost."}
+                        {isNetworkError 
+                            ? `Network Error: Cannot reach Antigravity Engine at ${baseUrl}. Ensure Ngrok is running on the Mac Mini.` 
+                            : "Firestore Error: The Mac Mini reached the cloud but failed to authenticate. Check the Service Account JSON."}
+                    </p>
+                    <p style={{ fontSize: "0.7rem", marginTop: "0.4rem", opacity: 0.7, fontStyle: "italic" }}>
+                        Diagnostic: API returned {isNetworkError ? "Connection Refused (0)" : "Logic Error (200/500)"}.
                     </p>
                 </div>
             </div>
