@@ -246,6 +246,7 @@ class ImageAssessment:
     coaching: CoachingAdvice = field(default_factory=CoachingAdvice)
     denoising_applied: bool = False
     enhanced_path: str = ""        # Path to enhanced JPEG (if created)
+    rlhf_path: str = ""            # Path to low-res JPEG proxy for UI swiper
     exif: dict = field(default_factory=dict)
     processing_time: float = 0.0
 

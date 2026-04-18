@@ -95,9 +95,6 @@ def stream_batch(
             fpath = os.path.join(target_folder, f)
             if os.path.isfile(fpath) and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS:
                 stem = Path(f).stem
-                # Skip if already has XMP
-                if os.path.exists(os.path.join(target_folder, f"{stem}.xmp")):
-                    continue
                 if stem not in groups: groups[stem] = []
                 groups[stem].append(f)
 
@@ -187,6 +184,7 @@ def stream_batch(
 
                     # Tier Routing
                     enhanced_path = ""
+                    rlhf_path = ""
                     recovery_notes = _build_recovery_notes(quality, exif)
                     
                     if max_tier == Tier.CULL:
@@ -195,6 +193,11 @@ def stream_batch(
                         if quality.recovery_potential in ("high", "medium"):
                             result.recoverable += 1
                             tier_buckets["recoverable"] += 1
+                        
+                        # Even for Culls, we need a proxy for the 'Second Chance' bin
+                        rlhf_path = os.path.join(rlhf_input_dir, f"{stem}_rlhf.jpg")
+                        _enhance_file(filepath, filename, res["format_type"], exif.get("ISO", 0), rlhf_path, workspace_dir, result, ENHANCEMENT_PROFILE_RLHF)
+                        session_files.append(rlhf_path)
                     else:
                         if max_tier == Tier.REVIEW:
                             result.review += 1
@@ -207,15 +210,14 @@ def stream_batch(
                                 result.keepers += 1
                                 tier_buckets["keeper"] += 1
                         
-                        # Master & RLHF Enhancement
+                        # 1. RLHF Proxy (Global for all cloud-bound photos)
+                        rlhf_path = os.path.join(rlhf_input_dir, f"{stem}_rlhf.jpg")
+                        _enhance_file(filepath, filename, res["format_type"], exif.get("ISO", 0), rlhf_path, workspace_dir, result, ENHANCEMENT_PROFILE_RLHF)
+                        session_files.append(rlhf_path)
+
+                        # 2. Master & High-Res Enhancement
                         is_master = (raw_master and res == raw_master) or (not raw_master)
                         if is_master:
-                            # 1. RLHF Proxy
-                            rlhf_path = os.path.join(rlhf_input_dir, f"{stem}_rlhf.jpg")
-                            _enhance_file(filepath, filename, res["format_type"], exif.get("ISO", 0), rlhf_path, workspace_dir, result, ENHANCEMENT_PROFILE_RLHF)
-                            session_files.append(rlhf_path)
-                            
-                            # 2. High-Res Master
                             enhanced_path = os.path.join(enhanced_dir, f"{stem}_master.jpg")
                             _enhance_file(filepath, filename, res["format_type"], exif.get("ISO", 0), enhanced_path, workspace_dir, result, ENHANCEMENT_PROFILE_MASTER)
                             session_files.append(enhanced_path)
@@ -238,9 +240,9 @@ def stream_batch(
                     session_files.append(xmp_path)
 
                     # AI Coach
-                    denoise = exif.get("ISO", 0) > 1600 and enhanced_path != ""
+                    denoise = exif.get("ISO", 0) > 1600 and rlhf_path != ""
                     if denoise: result.denoised += 1
-                    assessment = ai_coach.assess_image(filename, filepath, res["format_type"], quality, exif, enhanced_path, denoise, (time.time()-res["start"]))
+                    assessment = ai_coach.assess_image(filename, filepath, res["format_type"], quality, exif, enhanced_path, rlhf_path, denoise, (time.time()-res["start"]))
                     assessment.recovery_potential = quality.recovery_potential
                     assessment.recovery_notes = recovery_notes
                     assessments.append(assessment)
@@ -276,29 +278,49 @@ def stream_batch(
             coaching = ai_coach.compile_batch_report(assessments, batch_time)
             result.batch_coaching = coaching
             
-            # Cloud Upload
-            yield _yield_log("Syncing RLHF samples to Cloud Storage...", "sys")
-            sampler = DiversitySampler(target_batch_size=50)
-            rlhf_batch = sampler.curate_rlhf_batch(assessments)
-            if rlhf_batch:
-                bridge = FirebaseBridge("firebase-service-account.json", "style-matcher-9480d.firebasestorage.app")
-                if bridge.initialize():
-                    bridge.upload_rlhf_batch(f"stream_{int(time.time())}", rlhf_batch)
-                    yield _yield_log(f"Successfully uploaded {len(rlhf_batch)} samples to Firebase.", "sys")
-
             # Mandate 4: Doppler Manifest Generation
             yield _yield_log("Generating fatigue-optimized Doppler manifest...", "sys")
-            portfolio = [a.filepath for a in assessments if a.tier == Tier.PORTFOLIO.value]
-            amber = [a.filepath for a in assessments if a.tier in [Tier.KEEPER.value, Tier.REVIEW.value]]
-            cull = [a.filepath for a in assessments if a.tier == Tier.CULL.value]
             
-            # The current working directory for the backend might vary, 
-            # so we target the sibling directory of this file (batch-backend-v2/).
+            # Use ImageAssessment objects for the manifest to preserve metadata (scores, tiers)
+            portfolio = [a for a in assessments if a.tier == Tier.PORTFOLIO.value]
+            amber = [a for a in assessments if a.tier in [Tier.KEEPER.value, Tier.REVIEW.value]]
+            cull = [a for a in assessments if a.tier == Tier.CULL.value]
+            
             manifest_dir = os.path.dirname(__file__)
-            generate_doppler_manifest(portfolio, amber, cull, manifest_dir)
-            yield _yield_log(f"Doppler manifest live at /api/batch-queue", "sys")
+            manifest_path, manifest_data = generate_doppler_manifest(portfolio, amber, cull, manifest_dir)
+            yield _yield_log(f"Local Doppler manifest live at /api/batch-queue", "sys")
 
-            yield _yield_log("Batch Complete.", "done", {
+            # ─── Cloud Plane Handshake (GA Hybrid-Cloud) ──────────────────
+            yield _yield_log("⚓ Initiating Cloud Plane Handshake...", "sys")
+            
+            # Use absolute path to resolve service account correctly regardless of CWD
+            service_account = "/Users/shivamagent/Desktop/Style-Matcher/batch-backend-v2/firebase-service-account.json"
+            bridge = FirebaseBridge(service_account, "style-matcher-9480d.firebasestorage.app")
+            
+            if bridge.initialize():
+                batch_id = f"batch_{session_id}_{int(time.time())}"
+                
+                # Convert ImageAssessment objects back to dicts for JSON/Firestore compatibility
+                manifest_photos = []
+                for p in manifest_data["photos"]:
+                    manifest_photos.append({
+                        "filename": p.filename,
+                        "filepath": p.filepath,
+                        "enhanced_path": p.enhanced_path, 
+                        "rlhf_path": p.rlhf_path,         # Crucial: explicit proxy path for cloud swiper
+                        "composite_score": p.composite_score,
+                        "tier": p.tier
+                    })
+                
+                yield _yield_log(f"Syncing {len(manifest_photos)} photos to cloud plane...", "sys")
+                if bridge.push_doppler_manifest(batch_id, manifest_photos):
+                    yield _yield_log(f"✅ Cloud Manifest Sync Complete. Batch ID: {batch_id}", "sys")
+                else:
+                    yield _yield_log("⚠️ Cloud Sync Failed. UI may remain blind.", "error")
+            else:
+                yield _yield_log(f"⚠️ Firebase Bridge failed (Creds check: {service_account})", "error")
+
+            yield _yield_log(f"Batch Complete. ({len(assessments)} photos assessed)", "done", {
                 "portfolio": result.portfolio, "keepers": result.keepers, "review": result.review,
                 "culled": result.culled, "recoverable": result.recoverable, "processing_time": result.processing_time
             })
@@ -311,7 +333,7 @@ def stream_batch(
 
 # ─── Helper Functions (Restored) ───────────────────────────────────
 
-def generate_doppler_manifest(portfolio_list: list, amber_list: list, cull_list: list, output_dir: str) -> str:
+def generate_doppler_manifest(portfolio_list: list, amber_list: list, cull_list: list, output_dir: str) -> tuple[str, dict]:
     """
     Mandate 4: Psychological Load Balancer (The 70/30 Dopamine Loop)
     Interleaves known winners (Portfolio) with likely losers (Amber/Cull) 
@@ -354,7 +376,7 @@ def generate_doppler_manifest(portfolio_list: list, amber_list: list, cull_list:
     manifest_data = {
         "generated_at": time.time(),
         "total_items": len(interleaved_queue),
-        "photos": interleaved_queue
+        "photos": interleaved_queue # Each item is photo.filepath or ImageAssessment
     }
     
     try:
@@ -366,7 +388,7 @@ def generate_doppler_manifest(portfolio_list: list, amber_list: list, cull_list:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
             
-    return manifest_path
+    return manifest_path, manifest_data
 
 def _enhance_file(filepath, filename, format_type, iso, enhanced_path, workspace_dir, result, profile) -> str:
     stem = os.path.splitext(filename)[0]

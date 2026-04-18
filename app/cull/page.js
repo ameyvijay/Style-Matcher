@@ -20,47 +20,53 @@ export default function CullPage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const fetchQueue = async () => {
-      try {
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const response = await fetch(`${baseUrl}/api/batch-queue`);
-        if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error("Manifest Not Found");
-          }
-          throw new Error("Failed to load batch queue");
-        }
-        const data = await response.json();
-        setReviewQueue(data);
-        setPhotos(data.photos || []);
+    let unsubscribePhotos = null;
+
+    // 1. Initial Handshake: Listen for the "Current Active" batch
+    const activeBatchRef = doc(db, "batches", "current_active");
+    const unsubscribeBatch = onSnapshot(activeBatchRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const batchData = snapshot.data();
+        const batchId = batchData.batch_id;
+        setReviewQueue(batchData);
+        
+        // 2. Secondary Subscription: Listen for Photos in this Batch
+        if (unsubscribePhotos) unsubscribePhotos();
+        
+        const photosQuery = query(
+          collection(db, "photos"),
+          where("batch_id", "==", batchId),
+          where("status", "==", "pending")
+        );
+        
+        unsubscribePhotos = onSnapshot(photosQuery, (photoSnapshot) => {
+          const photoData = photoSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          
+          // Doppler preserved: No sorting here, use Firestore order (pushed in Doppler sequence)
+          setPhotos(photoData.sort((a,b) => a.timestamp - b.timestamp));
+          setLoading(false);
+          setError(null);
+        }, (err) => {
+          console.error("Photos subscription error:", err);
+          setError("Failed to stream photos from cloud.");
+        });
+      } else {
         setLoading(false);
-      } catch (err) {
-        console.error("Manifest load error:", err);
-        setError(err.message);
-        setLoading(false);
+        setError("No active batch found in Cloud Plane.");
       }
-    };
-
-    fetchQueue();
-
-    /* Commenting out original Firestore listener for SSE Elimination
-    const q = query(
-      collection(db, "photos"),
-      where("status", "==", "pending"),
-      limit(20)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const photoData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setPhotos(photoData.sort((a, b) => b.score - a.score));
+    }, (err) => {
+      console.error("Batch subscription error:", err);
+      setError("Cloud Plane unreachable.");
       setLoading(false);
     });
 
-    return () => unsubscribe();
-    */
+    return () => {
+      unsubscribeBatch();
+      if (unsubscribePhotos) unsubscribePhotos();
+    };
   }, []);
 
   const handleSwipe = async (photoId, batchId, status) => {
@@ -76,8 +82,8 @@ export default function CullPage() {
       // 2. Local State Tracking for Stage 9 Handshake
       if (status === "approved") {
         const photo = photos.find(p => p.id === photoId);
-        if (photo && photo.filepath) {
-          setAcceptedPaths(prev => [...prev, photo.filepath]);
+        if (photo && photo.original_path) {
+          setAcceptedPaths(prev => [...prev, photo.original_path]);
         }
       }
 

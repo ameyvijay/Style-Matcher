@@ -185,6 +185,7 @@ def assess_image(
     quality: QualityScore,
     exif: dict,
     enhanced_path: str = "",
+    rlhf_path: str = "",
     denoising_applied: bool = False,
     processing_time: float = 0.0,
 ) -> ImageAssessment:
@@ -220,6 +221,7 @@ def assess_image(
         coaching=coaching,
         denoising_applied=denoising_applied,
         enhanced_path=enhanced_path,
+        rlhf_path=rlhf_path,
         exif=exif,
         processing_time=processing_time,
     )

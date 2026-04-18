@@ -2,6 +2,7 @@ import os
 import time
 import json
 import threading
+from datetime import timedelta
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
@@ -38,17 +39,32 @@ class FirebaseBridge:
         if self.initialized:
             return True
             
-        if not os.path.exists(self.service_account_path):
-            print(f"[firebase_bridge] Error: Service account not found at {self.service_account_path}")
-            return False
-            
         try:
-            cred = credentials.Certificate(self.service_account_path)
-            firebase_admin.initialize_app(cred, {
-                'storageBucket': self.storage_bucket
-            })
+            if not firebase_admin._apps:
+                if not os.path.exists(self.service_account_path):
+                    print(f"[firebase_bridge] Error: Service account not found at {self.service_account_path}")
+                    return False
+                cred = credentials.Certificate(self.service_account_path)
+                firebase_admin.initialize_app(cred, {
+                    'storageBucket': self.storage_bucket
+                })
+            
             self.db = firestore.client()
-            self.bucket = storage.bucket()
+            # If the app was initialized elsewhere without a bucket, we MUST bind it explicitly
+            try:
+                # User confirmed: gs://style-matcher-9480d.firebasestorage.app
+                target_bucket = self.storage_bucket.replace("gs://", "")
+                self.bucket = storage.bucket(target_bucket)
+                
+                # Performance Note: exists() is a network call, but essential for the cloud handshake verification
+                if not self.bucket.exists():
+                    print(f"❌ [firebase_bridge] Critical: Bucket '{target_bucket}' exists in config but NOT found on GCP.")
+                    print("👉 FIX: Go to Firebase Console > Storage > Click 'Get Started' to provision the bucket.")
+                    return False
+            except Exception as e:
+                print(f"❌ [firebase_bridge] Storage access error: {e}")
+                return False
+
             self.initialized = True
             print("[firebase_bridge] Connected to Firebase successfully")
             return True
@@ -59,54 +75,110 @@ class FirebaseBridge:
     # ─── Data Injection ──────────────────────────────────────────────────
     def upload_rlhf_batch(self, batch_id: str, photos: list[ImageAssessment]) -> bool:
         """
-        Uploads a batch of 90% RLHF JPEGs to Storage and adds metadata to Firestore.
+        [DEPRECATED] Use push_doppler_manifest for coordinated 70/30 cloud sync.
+        Legacy support for uploading a sample batch of RLHF JPEGs.
         """
         if not self.initialize():
             return False
             
-        print(f"[firebase_bridge] Uploading batch {batch_id}...")
+        print(f"[firebase_bridge] Uploading batch {batch_id} (Legacy)...")
+        # Reuse the new push logic but for a subset
+        return self.push_doppler_manifest(batch_id, [
+            {
+                "filename": p.filename,
+                "filepath": p.filepath,
+                "enhanced_path": p.enhanced_path,
+                "composite_score": p.composite_score,
+                "tier": p.tier
+            } for p in photos
+        ])
+
+    def push_doppler_manifest(self, batch_id: str, manifest_photos: list[dict]) -> bool:
+        """
+        GA Transition: Mass-injects the 70/30 fatigue-optimized manifest into Firestore.
+        Uses 500-op chunked loading to respect Firestore limits.
+        """
+        if not self.initialize():
+            return False
+
+        print(f"[firebase_bridge] Initializing Cloud Ingestion for Batch: {batch_id}")
         
+        # 1. Initialize Batch Singleton
         batch_ref = self.db.collection('batches').document(batch_id)
         batch_ref.set({
-            'status': 'processing',
+            'batch_id': batch_id,
+            'status': 'ingesting',
             'timestamp': firestore.SERVER_TIMESTAMP,
-            'total_photos': len(photos),
+            'total_photos': len(manifest_photos),
             'processed_count': 0
         })
 
-        for i, photo in enumerate(photos):
-            if not photo.enhanced_path or not os.path.exists(photo.enhanced_path):
-                continue
-                
-            photo_id = f"{batch_id}_{photo.filename.replace('.', '_')}"
-            storage_path = f"rlhf/{batch_id}/{photo.filename}"
+        # 2. Chunked Firestore Injection (500-op limit)
+        CHUNK_SIZE = 450 # Safety margin below 500
+        for i in range(0, len(manifest_photos), CHUNK_SIZE):
+            chunk = manifest_photos[i:i + CHUNK_SIZE]
+            firestore_batch = self.db.batch()
             
-            try:
-                # 1. Upload to Storage
-                blob = self.bucket.blob(storage_path)
-                blob.upload_from_filename(photo.enhanced_path)
-                blob.make_public() # PWA needs to see it
-                public_url = blob.public_url
+            for j, photo in enumerate(chunk):
+                # Ensure we have a valid RLHF URL (Physical upload to Storage)
+                rlhf_url = ""
+                
+                # Priority: 1. Dedicated Proxy (rlhf_path), 2. Master Render (enhanced_path)
+                # We strictly avoid uploading RAW files (original_path) to Storage for the swiper.
+                upload_target = photo.get("rlhf_path") or photo.get("enhanced_path")
+                
+                if upload_target and os.path.exists(upload_target):
+                    # Only upload if it's a JPEG (safety check for browser compatibility)
+                    if upload_target.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        storage_path = f"rlhf/{batch_id}/{photo['filename']}.jpg"
+                        try:
+                            # 🧪 Debug: Verify bucket before upload
+                            if not self.bucket:
+                                print("❌ [firebase_bridge] Storage bucket NOT initialized.")
+                            else:
+                                blob = self.bucket.blob(storage_path)
+                                blob.upload_from_filename(upload_target)
+                                
+                                # Generate a Signed URL for Vercel/PWA consumption (Bypasses 'allow read: if false')
+                                # Expiration: 7 days from now (timedelta avoids the Unix epoch trap)
+                                rlhf_url = blob.generate_signed_url(expiration=timedelta(days=7))
+                                
+                                print(f"✅ [firebase_bridge] Uploaded & Signed {photo['filename']} -> {storage_path}")
+                        except Exception as e:
+                            print(f"⚠️ [firebase_bridge] Storage upload failed for {photo['filename']}: {str(e)}")
+                    else:
+                        print(f"⚠️ [firebase_bridge] Skipping non-JPEG upload target: {upload_target}")
+                else:
+                    if not upload_target:
+                        print(f"⚠️ [firebase_bridge] No render found for {photo['filename']} (Sync only)")
+                    else:
+                        print(f"⚠️ [firebase_bridge] Render path missing on disk: {upload_target}")
 
-                # 2. Add to Firestore
+                photo_id = f"{batch_id}_{i+j}_{photo['filename'].replace('.', '_')}"
                 photo_ref = self.db.collection('photos').document(photo_id)
-                photo_ref.set({
+                firestore_batch.set(photo_ref, {
                     'batch_id': batch_id,
-                    'filename': photo.filename,
-                    'original_path': photo.filepath,
-                    'rlhf_url': public_url,
+                    'filename': photo['filename'],
+                    'original_path': photo['filepath'],
+                    'rlhf_url': rlhf_url,
                     'status': 'pending',
-                    'score': photo.composite_score,
-                    'tier': photo.tier,
-                    'user_id': None, # To be assigned or picked up by first user
+                    'score': photo.get('composite_score', 0),
+                    'tier': photo.get('tier', 'review'),
                     'timestamp': firestore.SERVER_TIMESTAMP
                 })
-                
-                print(f"[firebase_bridge] [{i+1}/{len(photos)}] Injected {photo.filename}")
-            except Exception as e:
-                print(f"[firebase_bridge] Error injecting {photo.filename}: {e}")
 
+            firestore_batch.commit()
+            print(f"[firebase_bridge] Comitted Chunk [{i//CHUNK_SIZE + 1}/{(len(manifest_photos)//CHUNK_SIZE)+1}]")
+
+        # 3. Finalize & Set Current Active Singleton
         batch_ref.update({'status': 'ready_for_rlhf'})
+        self.db.collection('batches').document('current_active').set({
+            'batch_id': batch_id,
+            'total_photos': len(manifest_photos),
+            'last_sync': firestore.SERVER_TIMESTAMP
+        })
+        
+        print(f"✅ [firebase_bridge] Total Cloud Plane Handshake Complete: {len(manifest_photos)} photos.")
         return True
 
     # ─── Decision Listener ───────────────────────────────────────────────
