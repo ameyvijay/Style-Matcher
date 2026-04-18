@@ -63,3 +63,10 @@ __pycache__/
 
 # firebase secrets
 firebase-service-account.json
+
+# Antigravity Internal Noise
+.gemini/
+chaos_test_assets/
+batch-backend-v2/*.pid
+batch-backend-v2/chaos_killswitch.json
+batch-backend-v2/batch_queue.json
