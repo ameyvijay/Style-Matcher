@@ -7,39 +7,43 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-import ReactMarkdown from "react-markdown";
-
 // 1. The Observability Banner Component (Glassmorphism Styled)
-const SyncAlertBanner = ({ health }) => {
-    if (!health || (health.failed_directories === 0 && health.retrying_directories === 0)) {
-        return null; // Hidden when healthy
+// 1. The Observability Banner Component (GA Hybrid-Cloud)
+const SyncAlertBanner = ({ health, apiError }) => {
+    // DISCONNECTED STATE: Red / High Urgency
+    if (apiError || (health && health.status === "disconnected")) {
+        return (
+            <div style={{ 
+                background: "rgba(127, 29, 29, 0.4)", 
+                backdropFilter: "blur(12px)", 
+                border: "1px solid rgba(239, 68, 68, 0.5)", 
+                color: "#fecaca", 
+                padding: "1.25rem", 
+                borderRadius: "12px", 
+                display: "flex", 
+                alignItems: "center", 
+                marginBottom: "1.5rem",
+                boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)" 
+            }}>
+                <XCircle style={{ width: "24px", height: "24px", marginRight: "1rem", color: "#f87171", flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                    <h3 style={{ fontWeight: "bold", color: "#fecaca", margin: 0 }}>🚨 Control Plane Disconnected</h3>
+                    <p style={{ fontSize: "0.85rem", opacity: 0.9, margin: 0 }}>
+                        {apiError ? "Mac Mini Local API is unreachable." : "Firestore Control Plane connection lost."}
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!health || health.rendering_remaining === 0) {
+        return null; // Hidden when healthy and idle
     }
 
     return (
         <div style={{ width: "100%", marginBottom: "1.5rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-            {/* FAILED STATE: Frosted Red / Critical */}
-            {health.failed_directories > 0 && (
-                <div style={{ 
-                    background: "rgba(127, 29, 29, 0.4)", 
-                    backdropFilter: "blur(12px)", 
-                    border: "1px solid rgba(239, 68, 68, 0.5)", 
-                    color: "#fecaca", 
-                    padding: "1.25rem", 
-                    borderRadius: "12px", 
-                    display: "flex", 
-                    alignItems: "center", 
-                    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)" 
-                }}>
-                    <XCircle style={{ width: "24px", height: "24px", marginRight: "1rem", color: "#f87171", flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                        <h3 style={{ fontWeight: "bold", color: "#fecaca", margin: 0 }}>🚨 Sync Failed: {health.failed_directories} Directories Stranded</h3>
-                        <p style={{ fontSize: "0.85rem", opacity: 0.9, margin: 0 }}>Maximum retries exceeded. Manual intervention required on the Mac Studio.</p>
-                    </div>
-                </div>
-            )}
-
-            {/* RETRYING STATE: Frosted Amber / Warning */}
-            {health.retrying_directories > 0 && (
+            {/* RENDERING STATE: Frosted Amber / Progress */}
+            {health.rendering_remaining > 0 && (
                 <div style={{ 
                     background: "rgba(120, 53, 15, 0.4)", 
                     backdropFilter: "blur(12px)", 
@@ -53,9 +57,9 @@ const SyncAlertBanner = ({ health }) => {
                 }}>
                     <AlertTriangle style={{ width: "24px", height: "24px", marginRight: "1rem", color: "#fbbf24", flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
-                        <h3 style={{ fontWeight: "bold", color: "#fef3c7", margin: 0 }}>⚠️ Stranded Masters: Tailscale Network Unreachable</h3>
+                        <h3 style={{ fontWeight: "bold", color: "#fef3c7", margin: 0 }}>⚙️ Rendering Masters: {health.rendering_remaining} Remaining</h3>
                         <p style={{ fontSize: "0.85rem", opacity: 0.9, margin: 0 }}>
-                            Retrying {health.retrying_directories} directories. Optimized with --append-verify for resumption.
+                            Mac Mini M4 GPU is fulfilling Stage 9 realization requests from Firestore.
                         </p>
                     </div>
                     <RefreshCw className="animate-spin" style={{ width: "20px", height: "20px", marginLeft: "auto", color: "#fbbf24", opacity: 0.6 }} />
@@ -80,7 +84,8 @@ export default function BatchStudio() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);
-    const [syncHealth, setSyncHealth] = useState({ failed_directories: 0, retrying_directories: 0 });
+    const [syncHealth, setSyncHealth] = useState(null);
+    const [apiError, setApiError] = useState(false);
     const [logs, setLogs] = useState([]);
     const [sessionId] = useState(() => `sess_${Math.random().toString(36).substr(2, 9)}`);
     const [isRollingBack, setIsRollingBack] = useState(false);
@@ -94,7 +99,7 @@ export default function BatchStudio() {
         if (lastTarget) setTargetFolder(lastTarget);
     }, []);
 
-    // 2. The Telemetry Hook (polling loop)
+    // 2. The Telemetry Hook (GA Hybrid-Cloud Polling)
     useEffect(() => {
         let isMounted = true;
         const fetchSyncHealth = async () => {
@@ -106,14 +111,17 @@ export default function BatchStudio() {
                 
                 if (isMounted) {
                     setSyncHealth(data);
+                    setApiError(false);
                 }
             } catch (error) {
-                console.warn("Telemetry poll failed (Backend down or Tailscale offline)");
+                if (isMounted) {
+                    setApiError(true);
+                }
             }
         };
 
         fetchSyncHealth();
-        const intervalId = setInterval(fetchSyncHealth, 10000); // 10-second polling
+        const intervalId = setInterval(fetchSyncHealth, 5000); // Tight 5s polling for rendering progress
 
         return () => {
             isMounted = false;
@@ -153,17 +161,28 @@ export default function BatchStudio() {
 
         try {
             const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-            const url = `${baseUrl}/api/batch-process-stream?target_folder=${encodeURIComponent(targetFolder)}&benchmark_folder=${encodeURIComponent(benchmarkFolder)}&session_id=${sessionId}`;
+            const url = `${baseUrl}/api/batch-process`;
             
             // Immediate feedback
             setLogs([{ timestamp: Date.now()/1000, type: "sys", message: `Connecting to Antigravity Kernel at ${baseUrl}...` }]);
             
-            const response = await fetch(url);
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    target_folder: targetFolder, 
+                    benchmark_folder: benchmarkFolder, 
+                    session_id: sessionId 
+                })
+            });
             
             if (!response.ok) {
-                const errData = await response.json();
+                const errData = await response.json().catch(() => ({}));
                 throw new Error(errData.detail || `Connection failed: ${response.statusText}`);
             }
+            
+            const data = await response.json();
+            setResults({ metrics: data, mode: "batch" });
 
             /* ⚠️ SSE Elimination: Commenting out chunk reader. 
                The frontend should now fetch batch_queue.json via useEffect.

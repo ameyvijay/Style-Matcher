@@ -15,12 +15,15 @@ export default function CullPage() {
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reviewQueue, setReviewQueue] = useState(null);
+  const [acceptedPaths, setAcceptedPaths] = useState([]);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchQueue = async () => {
       try {
-        const response = await fetch("/api/batch-queue");
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const response = await fetch(`${baseUrl}/api/batch-queue`);
         if (!response.ok) {
           if (response.status === 404) {
             throw new Error("Manifest Not Found");
@@ -62,7 +65,7 @@ export default function CullPage() {
 
   const handleSwipe = async (photoId, batchId, status) => {
     try {
-      // 1. Update Photo Status
+      // 1. Update Photo Status (Firestore)
       const photoRef = doc(db, "photos", photoId);
       await updateDoc(photoRef, {
         status: status,
@@ -70,15 +73,51 @@ export default function CullPage() {
         decided_at: new Date().toISOString()
       });
 
-      // 2. Increment Batch Progress
+      // 2. Local State Tracking for Stage 9 Handshake
+      if (status === "approved") {
+        const photo = photos.find(p => p.id === photoId);
+        if (photo && photo.filepath) {
+          setAcceptedPaths(prev => [...prev, photo.filepath]);
+        }
+      }
+
+      // 3. Increment Batch Progress
       const batchRef = doc(db, "batches", batchId);
       await updateDoc(batchRef, {
         processed_count: increment(1)
       });
 
-      // Local state will update via onSnapshot listener
+      // Local state will update via filtering the current set
+      setPhotos(prev => prev.filter(p => p.id !== photoId));
     } catch (error) {
       console.error("Error updating decision:", error);
+    }
+  };
+
+  const finalizeBatch = async () => {
+    if (acceptedPaths.length === 0) {
+      alert("No photos were accepted. Sync spooler will not be triggered.");
+      return;
+    }
+
+    setIsFinalizing(true);
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${baseUrl}/api/session/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accepted_file_paths: acceptedPaths })
+      });
+
+      if (!response.ok) throw new Error("Stage 9 Handshake Failed");
+      
+      alert("🚀 Session Closed. M4 Realization Triggered. Spooling to TrueNAS...");
+      // Optionally redirect to Batch Studio to monitor sync
+    } catch (err) {
+      console.error("Finalization error:", err);
+      alert(`Error: ${err.message}. Please verify backend is running on :8000.`);
+    } finally {
+      setIsFinalizing(false);
     }
   };
 
@@ -146,6 +185,26 @@ export default function CullPage() {
                     <p className={styles.emptyStateDesc}>
                       You've processed all pending photos. Great work!
                     </p>
+                    
+                    <button 
+                      onClick={finalizeBatch}
+                      className={styles.finalizeBtn}
+                      disabled={isFinalizing}
+                      style={{
+                        marginTop: "1.5rem",
+                        padding: "1rem 2rem",
+                        background: "linear-gradient(135deg, #4ade80 0%, #22c55e 100%)",
+                        border: "none",
+                        borderRadius: "12px",
+                        color: "white",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                        boxShadow: "0 4px 14px 0 rgba(34, 197, 94, 0.39)",
+                        opacity: isFinalizing ? 0.7 : 1
+                      }}
+                    >
+                      {isFinalizing ? "Processing Masters..." : "🚀 Finalize & Render Masters"}
+                    </button>
                   </motion.div>
                 )
               )}

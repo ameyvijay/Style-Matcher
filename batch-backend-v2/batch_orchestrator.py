@@ -286,6 +286,18 @@ def stream_batch(
                     bridge.upload_rlhf_batch(f"stream_{int(time.time())}", rlhf_batch)
                     yield _yield_log(f"Successfully uploaded {len(rlhf_batch)} samples to Firebase.", "sys")
 
+            # Mandate 4: Doppler Manifest Generation
+            yield _yield_log("Generating fatigue-optimized Doppler manifest...", "sys")
+            portfolio = [a.filepath for a in assessments if a.tier == Tier.PORTFOLIO.value]
+            amber = [a.filepath for a in assessments if a.tier in [Tier.KEEPER.value, Tier.REVIEW.value]]
+            cull = [a.filepath for a in assessments if a.tier == Tier.CULL.value]
+            
+            # The current working directory for the backend might vary, 
+            # so we target the sibling directory of this file (batch-backend-v2/).
+            manifest_dir = os.path.dirname(__file__)
+            generate_doppler_manifest(portfolio, amber, cull, manifest_dir)
+            yield _yield_log(f"Doppler manifest live at /api/batch-queue", "sys")
+
             yield _yield_log("Batch Complete.", "done", {
                 "portfolio": result.portfolio, "keepers": result.keepers, "review": result.review,
                 "culled": result.culled, "recoverable": result.recoverable, "processing_time": result.processing_time
@@ -314,7 +326,7 @@ def generate_doppler_manifest(portfolio_list: list, amber_list: list, cull_list:
     
     interleaved_queue = []
     
-    while accepts and rejects:
+    while accepts or rejects:
         chunk_accepts = min(len(accepts), 7)
         chunk_rejects = min(len(rejects), 3)
         

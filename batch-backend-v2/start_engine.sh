@@ -1,32 +1,51 @@
 #!/bin/bash
-# Antigravity Engine MLOps Wrapper v2.1
-# Executed by 'Start Engine.app'
+# Antigravity Engine v3.0 — Hybrid-Cloud Unified Bootstrapper
+# Optimized for Mac Mini M4 Studio Worker Node
 
-echo "🚀 Booting Antigravity Kernel..."
-cd /Users/shivamagent/Desktop/Style-Matcher/batch-backend-v2
+set -e
 
-# 1. Kill any zombie instances quietly
-lsof -t -i :8000 | xargs kill -9 2>/dev/null || true
-pkill -f "ngrok http 8000" || true
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# 2. Boot the FastAPI Backend Engine
-source .venv/bin/activate
-export PATH="/opt/homebrew/bin:$PATH"
-export ENGINE_STATUS="online"
-nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
-
-# 3. Boot the Ngrok tunnel
-echo "🌐 Opening Global Tunnel..."
-nohup ngrok http 8000 --domain=embroider-fragment-flight.ngrok-free.dev > ngrok.log 2>&1 &
-
-# 4. Wait for stability & notify
-sleep 3
-if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null ; then
-    echo "✅ Engine is ONLINE"
-    osascript -e 'display notification "Kernel is active and reachable via Ngrok." with title "🚀 Antigravity Engine" subtitle "System Online"'
+# 1. Load Control Plane Environment
+if [ -f .env.local ]; then
+    echo "🔑 Loading .env.local..."
+    export $(grep -v '^#' .env.local | xargs)
 else
-    echo "❌ Engine FAILED to start. Check backend.log"
-    osascript -e 'display notification "Kernel failed to boot. Check logs." with title "⚠️ Engine Error"'
+    echo "⚠️  WARNING: .env.local not found. Using system defaults."
 fi
 
-exit 0
+# 2. Cleanup Zombie Processes
+echo "🧹 Cleaning up existing Antigravity processes..."
+lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+pkill -f "sync_watchdog.py" || true
+
+# 3. Environment Prep
+source .venv/bin/activate
+export PYTHONUNBUFFERED=1
+
+# 4. Launch Backend API (Control Plane Bridge)
+echo "🚀 Booting FastAPI Gateway..."
+nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload > backend.log 2>&1 &
+BACKEND_PID=$!
+
+# 5. Launch Cloud Worker (GPS fulfilment)
+echo "📡 Initializing Firestore Pull Listener..."
+nohup python3 sync_watchdog.py > sync_watchdog.out.log 2>&1 &
+WORKER_PID=$!
+
+# 6. Terminal Dashboard
+clear
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  🚀 ANTIGRAVITY HYBRID-CLOUD ENGINE v3.0"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ● Backend Gateway:  PID [$BACKEND_PID] - Port 8000"
+echo "  ● Cloud Worker:     PID [$WORKER_PID]"
+echo "  ● Source Root:      $SOURCE_ROOT"
+echo "  ● Master Root:      $LOCAL_MASTER_ROOT"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  📡 Streaming Real-time Worker Logs:"
+echo ""
+
+# Tail the watchdog log to provide a live observation window
+tail -f sync_watchdog.out.log

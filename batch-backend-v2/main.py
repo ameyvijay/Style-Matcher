@@ -270,26 +270,40 @@ async def pick_folder():
 # ─── Analytics Dashboard ──────────────────────────────────────────
 @app.get("/api/health/sync")
 async def get_sync_health():
-    """Return sync spooler queue state for the MLOps / UI Banner."""
-    db = SessionLocal()
+    """
+    Hybrid-Cloud Telemetry: Pings Firestore Control Plane 
+    to report pending master renders to the Glassmorphism UI.
+    """
+    db_local = SessionLocal()
+    firestore_connected = False
+    rendering_remaining = 0
+    
     try:
-        failed_count = db.query(SyncQueue).filter(SyncQueue.status == "FAILED").count()
-        retrying_count = db.query(SyncQueue).filter(
-            SyncQueue.status == "PENDING", 
-            SyncQueue.retry_count > 0
-        ).count()
-        pending_count = db.query(SyncQueue).filter(
-            SyncQueue.status.in_(["PENDING", "SYNCING"])
-        ).count()
+        # 1. Check Local SQLite State (Legacy mapping)
+        failed_count = db_local.query(SyncQueue).filter(SyncQueue.status == "FAILED").count()
         
+        # 2. Check Firestore Control Plane (GA Standard)
+        from firebase_admin import firestore
+        try:
+            # We use a lightweight check to avoid blocking the health poll
+            db_cloud = firestore.client()
+            pending_query = db_cloud.collection('photos').where('status', 'in', ['accepted', 'pending_render'])
+            results = pending_query.get(timeout=3.0)
+            rendering_remaining = len(results)
+            firestore_connected = True
+        except Exception as fe:
+            print(f"📡 [Control Plane] Offline: {fe}")
+            firestore_connected = False
+
         return {
-            "status": "warning" if failed_count > 0 else "operational",
+            "status": "operational" if firestore_connected else "disconnected",
+            "firestore_connected": firestore_connected,
+            "rendering_remaining": rendering_remaining,
             "failed_directories": failed_count,
-            "retrying_directories": retrying_count,
-            "active_queue": pending_count
+            "active_queue": rendering_remaining 
         }
     finally:
-        db.close()
+        db_local.close()
 
 @app.get("/api/analytics")
 async def get_analytics():
@@ -443,6 +457,8 @@ async def batch_process(request: BatchRequest):
     final_result = {}
     for event_str in batch_orchestrator.stream_batch(request.target_folder, request.benchmark_folder):
         event = json.loads(event_str.strip())
+        if event["type"] == "error":
+            return {"status": "error", "message": event["message"]}
         if event["type"] == "done":
             final_result = event["data"]
             break

@@ -1,116 +1,154 @@
 #!/usr/bin/env python3
 """
-Antigravity Engine - Sync Watchdog Daemon
-Independent Spooler for TrueNAS Durable Storage
+Antigravity Engine - Hybrid-Cloud Sync Watchdog
+Mac Mini GPU Worker & Firestore Listener
 
-Execution: Run as a standalone daemon via launchd.
+Execution: Run via start_engine.sh
 """
 
+import os
 import sys
 import time
+import shutil
 import subprocess
-import asyncio
-from datetime import datetime
+import threading
+from pathlib import Path
+from typing import Dict, Any
 
-from sqlalchemy.orm import Session
-from database import SessionLocal, SyncQueue
+import firebase_admin
+from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.watch import Watch
 
-# Configuration
-NAS_TARGET = "admin@100.x.y.z:/mnt/pool/nas_dataset/"
-MAX_RETRIES = 5
-POLL_INTERVAL_SEC = 30
+# Local Imports
+import raw_developer
 
-def check_tailscale_status() -> bool:
-    """Pre-flight check: ensure the Tailscale tunnel is active."""
-    try:
-        # Note: adjust tailscale path if it's uniquely installed on the M4 Studio
-        result = subprocess.run(
-            ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "status", "--json"],
-            capture_output=True, timeout=5
-        )
-        # Using a simple check here; if the binary runs and returns 0, tailscale daemon is up.
-        # Ideally, we would parse JSON to look for the specific 100.x.y.z node, but this prevents
-        # immediate crashes if the ISP drops the whole tunnel.
-        return result.returncode == 0
-    except Exception as e:
-        # Simple fallback ping test
-        try:
-            ping_res = subprocess.run(
-                ["ping", "-c", "1", "-W", "2", "100.x.y.z"],
-                capture_output=True, timeout=3
-            )
-            return ping_res.returncode == 0
-        except Exception:
-            return False
+class MirrorManager:
+    """
+    Handles hierarchical file mirroring and atomic Stage 9 rendering.
+    Ensures LOCAL_MASTER_ROOT replicates exactly the subfolder structure of SOURCE_ROOT.
+    """
+    def __init__(self, source_root: str, local_master_root: str):
+        self.source_root = Path(source_root).resolve()
+        self.local_master_root = Path(local_master_root).resolve()
 
+    def _get_mirrored_destination(self, source_filepath: str) -> Path:
+        source_path = Path(source_filepath).resolve()
+        
+        # Guard against arbitrary paths outside the SOURCE_ROOT
+        if self.source_root not in source_path.parents:
+            raise ValueError(f"Source path {source_path} breaches allowed source root constraint {self.source_root}.")
+            
+        rel_path = source_path.relative_to(self.source_root)
+        target_dir = self.local_master_root / rel_path.parent
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        return target_dir / f"{source_path.stem}_master.jpg"
 
-async def sync_directory(session: Session, queue_item: SyncQueue):
-    """Executes the hardened rsync pass to TrueNAS."""
-    queue_item.status = "SYNCING"
-    queue_item.last_attempt_timestamp = datetime.utcnow()
-    session.commit()
+    def render_atomic(self, source_filepath: str) -> str:
+        """
+        Executes Stage 9 Render with Atomic Handshake.
+        Renders to .tmp then os.replace to target.
+        """
+        final_dest = self._get_mirrored_destination(source_filepath)
+        tmp_dest = final_dest.with_suffix(".tmp")
+        
+        print(f"▶️ [Stage 9] Rendering: {source_filepath} -> {tmp_dest}")
+        
+        # --- Stage 9 M4 MPS / rawpy execution ---
+        success = raw_developer.develop(source_filepath, str(tmp_dest))
+        
+        if not success or not tmp_dest.exists():
+            raise RuntimeError(f"Stage 9 Render failed for {source_filepath}")
+            
+        # Final Handshake (Atomic Rename)
+        os.replace(tmp_dest, final_dest)
+        print(f"✅ [Stage 9] Atomic Land: {final_dest}")
+        return str(final_dest)
 
-    print(f"[{datetime.now()}] 📡 Initiating TrueNAS Sync for {queue_item.enhanced_dir_path}")
+class FirebaseWorker:
+    """
+    Real-time Firestore listener (The Pull Mechanism).
+    Monitors status == 'accepted' and triggers local GPU fulfillment.
+    """
+    def __init__(self, service_account: str, source_root: str, local_master_root: str):
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(service_account)
+            firebase_admin.initialize_app(cred)
+            
+        self.db = firestore.client()
+        self.mirror_manager = MirrorManager(source_root, local_master_root)
+        self.watch = None
 
-    try:
-        # Hardened Rsync command
-        # --partial and --append-verify allow for robust recovery of massive 60MP files automatically.
-        result = subprocess.run(
-            [
-                "rsync", "-av", "--partial", "--append-verify", "--timeout=60",
-                f"{queue_item.enhanced_dir_path}/", NAS_TARGET
-            ],
-            capture_output=True, text=True
-        )
+    def start_listener(self):
+        print("📡 Instantiating Global Pull Listener (Firestore)...")
+        query = self.db.collection('photos').where('status', '==', 'accepted')
+        self.watch = query.on_snapshot(self._on_snapshot)
+        print("🟢 Antigravity Control Plane: Connected.")
 
-        if result.returncode == 0:
-            queue_item.status = "COMPLETED"
-            print(f"[{datetime.now()}] ✅ Successfully synced {queue_item.enhanced_dir_path}")
-        else:
-            # Typical error codes: 10 (Socket I/O), 12 (Stream Error), 23 (Partial Transfer), 30 (Timeout)
-            print(f"[{datetime.now()}] ⚠️ Rsync Exit Code {result.returncode} for {queue_item.enhanced_dir_path}")
-            queue_item.retry_count += 1
-            if queue_item.retry_count >= MAX_RETRIES:
-                queue_item.status = "FAILED"
-                print(f"[{datetime.now()}] ❌ Sync FAILED (Max Retries Reached) for {queue_item.enhanced_dir_path}")
-            else:
-                queue_item.status = "PENDING"
+    def _on_snapshot(self, col_snapshot, changes, read_time):
+        for change in changes:
+            if change.type.name in ['ADDED', 'MODIFIED']:
+                doc = change.document
+                data = doc.to_dict()
                 
-    except Exception as e:
-        print(f"[{datetime.now()}] 🚨 Fatal Sync Exception: {e}")
-        queue_item.retry_count += 1
-        queue_item.status = "FAILED" if queue_item.retry_count >= MAX_RETRIES else "PENDING"
+                # Path Drift vulnerability check
+                source_path = data.get("original_path") or data.get("source_filepath")
+                if not source_path or not os.path.exists(source_path):
+                    print(f"⚠️ [Vulnerability] Path Drift detected: {source_path}")
+                    doc.reference.update({"status": "error_path_missing"})
+                    continue
+                
+                # Hand-off to Stage 9 Atomic Render
+                print(f"🔥 [Decision] Control Plane triggered render for: {os.path.basename(source_path)}")
+                self._execute_remote_render(doc.reference, source_path)
 
-    session.commit()
-
-
-async def watchdog_loop():
-    print("🐾 Antigravity Sync Watchdog Started. Monitoring db...")
-    while True:
-        session = SessionLocal()
+    def _execute_remote_render(self, doc_ref, source_path: str):
         try:
-            # Fetch directories pending sync
-            pending_items = session.query(SyncQueue).filter(
-                SyncQueue.status.in_(["PENDING"])
-            ).order_by(SyncQueue.created_at.asc()).all()
-
-            if pending_items:
-                if not check_tailscale_status():
-                    print(f"[{datetime.now()}] 🛑 Tailscale Tunnel Offline. Sleeping...")
-                else:
-                    for item in pending_items:
-                        await sync_directory(session, item)
+            # Stage 9 execution via Mirror Manager
+            final_path = self.mirror_manager.render_atomic(source_path)
+            doc_ref.update({
+                "status": "completed", 
+                "local_master": final_path,
+                "completed_at": firestore.SERVER_TIMESTAMP
+            })
         except Exception as e:
-            print(f"[{datetime.now()}] Database Query Error: {e}")
-        finally:
-            session.close()
+            print(f"❌ [Error] Render Task Failed: {e}")
+            doc_ref.update({"status": "error_render_failed", "error": str(e)})
 
-        await asyncio.sleep(POLL_INTERVAL_SEC)
-
+def check_disk_space(min_gb=10) -> bool:
+    """Mandate: Ensure worker has enough thermal/storage overhead."""
+    total, used, free = shutil.disk_usage("/")
+    free_gb = free // (2**30)
+    print(f"💾 Storage Health: {free_gb}GB free")
+    return free_gb >= min_gb
 
 if __name__ == "__main__":
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("  🚀 Antigravity Hybrid-Cloud Worker v3.0")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    # 1. Environment Loading (Mocking for standalone if not run via shell)
+    source_root = os.getenv("SOURCE_ROOT", "/Users/amey/Pictures/RAW_Library")
+    local_master_root = os.getenv("LOCAL_MASTER_ROOT", "/Users/amey/Pictures/Antigravity_Masters")
+    service_account = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "./firebase-service-account.json")
+    
+    # 2. Disk Guard
+    if not check_disk_space(int(os.getenv("MIN_DISK_GB", 10))):
+        print("❌ CRITICAL: Insufficient disk space (Min 10GB required).")
+        sys.exit(1)
+
+    # 3. Boot Worker
     try:
-        asyncio.run(watchdog_loop())
+        worker = FirebaseWorker(service_account, source_root, local_master_root)
+        worker.start_listener()
+        
+        # Keep main thread alive
+        while True:
+            time.sleep(1)
+            
     except KeyboardInterrupt:
-        print("Watchdog manually terminated.")
+        print("\n👋 Worker shutting down gracefully...")
         sys.exit(0)
+    except Exception as e:
+        print(f"❌ Worker Crash: {e}")
+        sys.exit(1)
