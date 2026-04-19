@@ -1,0 +1,17 @@
+{
+  "venvPath": "/Users/shivamagent/Desktop/Style-Matcher/batch-backend-v2",
+  "venv": ".venv",
+  "pythonVersion": "3.9",
+  "pythonPlatform": "Darwin",
+  "typeCheckingMode": "basic",
+  "reportMissingModuleSource": "none",
+  "executionEnvironments": [
+    {
+      "root": "batch-backend-v2",
+      "pythonVersion": "3.9",
+      "extraPaths": [
+        "/Users/shivamagent/Desktop/Style-Matcher/batch-backend-v2/.venv/lib/python3.9/site-packages"
+      ]
+    }
+  ]
+}

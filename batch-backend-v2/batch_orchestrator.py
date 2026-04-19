@@ -37,6 +37,10 @@ import ai_coach
 from database import SessionLocal, Media, Inference, ModelRegistry
 from firebase_bridge import FirebaseBridge
 from diversity_sampler import DiversitySampler
+from clip_embedder import ClipEmbedder
+from vector_store import ChromaManager
+from preference_engine import SemanticRAG
+from prompt_registry import PromptRegistry, build_prompt_context, LATEST_VERSION
 
 # ─── Global State ──────────────────────────────────────────────────
 # Thread-safe registry for active sessions that should be aborted
@@ -84,7 +88,7 @@ def stream_batch(
         rlhf_input_dir = os.path.join(target_folder, "For RLHF input")
         workspace_dir = os.path.join(target_folder, ".antigravity_workspace")
         
-        for d in [enhanced_dir, rejected_dir, rlhf_input_dir, workspace_dir]:
+        for d in [workspace_dir]:
             os.makedirs(d, exist_ok=True)
 
         # Scan for images
@@ -115,6 +119,11 @@ def stream_batch(
 
         print("="*60)
 
+        # ── Phase C/E: Lazy-init CLIP Embedder, Vector Store & RAG ──
+        clip_embedder: ClipEmbedder | None = None
+        chroma_mgr: ChromaManager | None = None
+        semantic_rag: SemanticRAG | None = None
+
         assessments: list[ImageAssessment] = []
         result = BatchResult(total_scanned=total_files)
 
@@ -138,12 +147,48 @@ def stream_batch(
                     exif = preview_extractor.extract_metadata(filepath)
                     preview_bytes = preview_extractor.extract_preview(filepath)
                     if not preview_bytes: continue
-                    
-                    quality = quality_classifier.classify(preview_bytes, exif=exif)
+
+                    # ── Phase E: Pre-classification RAG embedding ──────────
+                    # Generate the CLIP embedding before calling the classifier
+                    # so the SemanticRAG score can inform the 70/30 composite.
+                    rag_similarity: float | None = None
+                    pre_embedding: list[float] | None = None
+                    try:
+                        if clip_embedder is None:
+                            clip_embedder = ClipEmbedder()
+                            chroma_mgr = ChromaManager()
+                            semantic_rag = SemanticRAG(chroma_mgr)
+                        # Embed from bytes written to a temp file
+                        import tempfile as _tf
+                        _tmp = _tf.mktemp(suffix=".jpg")
+                        try:
+                            with open(_tmp, "wb") as _fh:
+                                _fh.write(preview_bytes)
+                            pre_embedding = clip_embedder.generate_embedding(_tmp)
+                        finally:
+                            if os.path.exists(_tmp):
+                                os.unlink(_tmp)
+                        rag_ctx = semantic_rag.get_few_shot_context(pre_embedding)
+                        rag_similarity = rag_ctx["similarity_score"]
+                    except Exception as _rag_err:
+                        yield _yield_log(
+                            f"⚠️ RAG pre-embedding skipped for {filename}: {_rag_err}",
+                            "warn",
+                        )
+
+                    # Pass RAG score into classifier so it drives the 70/30 composite
+                    quality = quality_classifier.classify_with_analyst(
+                        preview_bytes,
+                        analyst=None,
+                        exif=exif,
+                        rag_similarity_score=rag_similarity,
+                    )
                     group_results.append({
                         "filename": filename, "filepath": filepath,
                         "exif": exif, "quality": quality, "start": time.time(),
-                        "format_type": get_format_type(filepath)
+                        "format_type": get_format_type(filepath),
+                        "pre_embedding": pre_embedding,   # Reused in Phase C block below
+                        "rag_context": rag_ctx if rag_similarity is not None else None,  # Phase F: full RAG context
                     })
                 except Exception as e:
                     yield _yield_log(f"❌ Error assessing {filename}: {str(e)}", "error")
@@ -224,10 +269,62 @@ def stream_batch(
                             media.enhanced_path = enhanced_path
                             db.commit()
 
-                    # Database Inference
+                    # ── Phase C: CLIP Embedding Persistence ───────────
+                    # Re-use the pre_embedding generated in the RAG step above
+                    # (already computed from the preview bytes).  If for any
+                    # reason it is missing, fall back to the RLHF proxy path.
+                    embedding_json = None
+                    try:
+                        if clip_embedder is None:
+                            clip_embedder = ClipEmbedder()
+                            chroma_mgr = ChromaManager()
+                            semantic_rag = SemanticRAG(chroma_mgr)
+                        embedding_vec = res.get("pre_embedding")
+                        if embedding_vec is None:
+                            embed_source = rlhf_path if rlhf_path and os.path.isfile(rlhf_path) else filepath
+                            embedding_vec = clip_embedder.generate_embedding(embed_source)
+                        embedding_json = json.dumps(embedding_vec)
+                    except Exception as emb_err:
+                        yield _yield_log(f"⚠️ CLIP embedding skipped for {filename}: {emb_err}", "warn")
+
+                    # ── Phase F: Prompt Context & Traceability ─────────
+                    # Build prompt context from RAG payload BEFORE the DB
+                    # write so _prompt_version and _semantic_desc are
+                    # available for the Inference record.
+                    _rag_ctx = res.get("rag_context")
+                    _prompt_version = LATEST_VERSION
+                    _semantic_desc = ""
+                    try:
+                        from models import detect_genre as _dg
+                        _genre = _dg(exif)
+                        _p_ctx = build_prompt_context(_rag_ctx, genre=_genre)
+                        _prompt_version = LATEST_VERSION
+                        if _rag_ctx and _rag_ctx.get("exemplars"):
+                            _semantic_desc = (
+                                f"RAG-enriched assessment (v{_prompt_version}): "
+                                f"similarity={_rag_ctx.get('similarity_score', 0):.1f}, "
+                                f"exemplars={len(_rag_ctx['exemplars'])}"
+                            )
+                    except Exception as _pf_err:
+                        yield _yield_log(
+                            f"⚠️ Prompt context build skipped for {filename}: {_pf_err}",
+                            "warn",
+                        )
+
+                    # Enrich the QualityScore with prompt metadata
+                    quality.semantic_description = _semantic_desc or quality.semantic_description
+
+                    # Database Inference — Phase F: include prompt_version + semantic_description
                     inf = Inference(
                         media_id=media.id, model_id=model_record.id,
-                        inference_value=json.dumps({"tier": max_tier.value, "sharp": quality.sharpness, "aes": quality.aesthetic}),
+                        inference_value=json.dumps({
+                            "tier": max_tier.value,
+                            "sharp": quality.sharpness,
+                            "aes": quality.aesthetic,
+                            "prompt_version": _prompt_version,
+                            "semantic_description": _semantic_desc,
+                        }),
+                        embedding_blob=embedding_json,
                         confidence=1.0, processing_time_ms=(time.time()-res["start"])*1000
                     )
                     db.add(inf)
@@ -239,10 +336,14 @@ def stream_batch(
                     file_tagger.tag_photo(filepath, max_tier, score=quality.composite, sharpness=quality.sharpness, aesthetic=quality.aesthetic, exposure=quality.exposure, reasoning=f"SSE Session: {session_id}", recovery_potential=quality.recovery_potential, recovery_notes=recovery_notes)
                     session_files.append(xmp_path)
 
-                    # AI Coach
+                    # AI Coach — Phase F: pass full rag_context for prompt-versioned assessment
                     denoise = exif.get("ISO", 0) > 1600 and rlhf_path != ""
                     if denoise: result.denoised += 1
-                    assessment = ai_coach.assess_image(filename, filepath, res["format_type"], quality, exif, enhanced_path, rlhf_path, denoise, (time.time()-res["start"]))
+
+                    assessment = ai_coach.assess_image(
+                        filename, filepath, res["format_type"], quality, exif,
+                        enhanced_path, rlhf_path, denoise, (time.time()-res["start"]),
+                    )
                     assessment.recovery_potential = quality.recovery_potential
                     assessment.recovery_notes = recovery_notes
                     assessments.append(assessment)
@@ -466,7 +567,7 @@ def scan_only(target_folder: str) -> BatchResult:
             
             if quality.recovery_potential in ("high", "medium"): result.recoverable += 1
 
-            assessment = ai_coach.assess_image(filename, res["filepath"], get_format_type(res["filepath"]), quality, exif, "", False, (time.time()-res["start"]))
+            assessment = ai_coach.assess_image(filename, res["filepath"], res.get("rlhf_path", ""), get_format_type(res["filepath"]), quality, exif, "", False, (time.time()-res["start"]))
             assessment.recovery_potential = quality.recovery_potential
             assessment.recovery_notes = _build_recovery_notes(quality, exif)
             assessments.append(assessment)

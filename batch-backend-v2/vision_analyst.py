@@ -5,6 +5,9 @@ import chromadb
 from pathlib import Path
 from typing import List, Dict, Optional
 
+from prompt_registry import PromptRegistry, build_prompt_context, LATEST_VERSION
+from models import detect_genre
+
 class VisionAnalyst:
     """
     Antigravity Engine v2.1 — Module 9: Semantic Intelligence (Ollama + RAG)
@@ -24,23 +27,54 @@ class VisionAnalyst:
             name="user_preferences",
             metadata={"hnsw:space": "cosine"}
         )
+        self._prompt_registry = PromptRegistry()
 
-    def analyze_image(self, image_path: str) -> str:
-        """Generate a natural language description of the photo."""
+    def analyze_image(
+        self,
+        image_path: str,
+        rag_context: Optional[Dict] = None,
+        exif: Optional[Dict] = None,
+        prompt_version: Optional[str] = None,
+    ) -> Dict:
+        """
+        Generate a natural language description of the photo using a
+        versioned prompt template enriched with RAG exemplar context.
+
+        Args:
+            image_path:      Absolute path to the image file.
+            rag_context:     Output of SemanticRAG.get_few_shot_context(), or None.
+            exif:            EXIF metadata dict (used for genre detection).
+            prompt_version:  Explicit prompt version to use; defaults to LATEST_VERSION.
+
+        Returns:
+            dict with keys:
+                'description'    – str, natural language description from VLM
+                'prompt_version' – str, version of the prompt template used
+        """
+        version = prompt_version or LATEST_VERSION
+
         if not os.path.exists(image_path):
-            return "File not found"
-            
+            return {"description": "File not found", "prompt_version": version}
+
         try:
-            # Use Ollama Python client
+            # Detect genre from EXIF for prompt context
+            genre = detect_genre(exif) if exif else "general"
+
+            # Build context-aware prompt via the registry
+            ctx = build_prompt_context(rag_context, genre=genre)
+            prompt_text = self._prompt_registry.get_prompt(version, ctx)
+
+            # Use Ollama Python client with the versioned prompt
             response = ollama.generate(
                 model=self.model,
-                prompt="Describe this image in detail, focusing on subject, lighting, mood, and composition. Be concise but descriptive.",
-                images=[image_path]
+                prompt=prompt_text,
+                images=[image_path],
             )
-            return response['response'].strip()
+            description = response['response'].strip()
+            return {"description": description, "prompt_version": version}
         except Exception as e:
             print(f"[vision_analyst] Error analyzing {image_path}: {e}")
-            return "Semantic analysis failed"
+            return {"description": "Semantic analysis failed", "prompt_version": version}
 
     def store_preference(self, photo_id: str, description: str, score: float, is_accepted: bool):
         """Add a photo's semantic pattern to the RAG store."""

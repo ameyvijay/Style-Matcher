@@ -20,6 +20,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -96,9 +97,25 @@ def classify(image_input: str | bytes, exif: dict = None) -> QualityScore:
     """
     return classify_with_analyst(image_input, None, exif)
 
-def classify_with_analyst(image_input: str | bytes, analyst: Optional[VisionAnalyst] = None, exif: dict = None) -> QualityScore:
+def classify_with_analyst(
+    image_input: str | bytes,
+    analyst: Optional[VisionAnalyst] = None,
+    exif: dict = None,
+    rag_similarity_score: Optional[float] = None,
+) -> QualityScore:
     """
     Full classification loop including semantic analysis.
+
+    Args:
+        image_input:          File path (str) or JPEG bytes.
+        analyst:              Optional VisionAnalyst for Ollama-based description
+                              and text-similarity scoring.
+        exif:                 Optional EXIF dict for genre-aware weighting.
+        rag_similarity_score: Optional pre-computed similarity score (0-100)
+                              from the SemanticRAG / ChromaDB retrieval step.
+                              When supplied this replaces the default 50.0
+                              neutral value for the 70/30 composite calculation,
+                              allowing RLHF signals to actively influence scoring.
     """
     start = time.time()
 
@@ -131,10 +148,12 @@ def classify_with_analyst(image_input: str | bytes, analyst: Optional[VisionAnal
     exposure = _compute_exposure(img)
 
     # 4. Semantic Intelligence (Ollama + RAG)
-    # We use a temp file for vision analysis if input is bytes
+    # We use a temp file for vision analysis if input is bytes.
+    # Priority: rag_similarity_score (ChromaDB) > analyst text similarity > neutral 50.0
     description = ""
-    similarity = 50.0 # Default neutral
-    
+    # Seed with the RAG score if available; analyst text-similarity can override below.
+    similarity = rag_similarity_score if rag_similarity_score is not None else 50.0
+
     if analyst:
         tmp_path = None
         if isinstance(image_input, bytes):
@@ -144,7 +163,9 @@ def classify_with_analyst(image_input: str | bytes, analyst: Optional[VisionAnal
             if tmp_path and os.path.exists(tmp_path): os.unlink(tmp_path)
         else:
             description = analyst.analyze_image(image_input)
-        
+
+        # Analyst text-similarity overwrites the RAG seed when a VisionAnalyst
+        # is active — the text-based signal is considered more specific.
         similarity = analyst.get_similarity_score(description)
 
     # 4. Composite Score (Genre-Aware Weighted Average)

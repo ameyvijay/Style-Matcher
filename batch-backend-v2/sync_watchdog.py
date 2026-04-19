@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Dict, Any
 
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import firestore
 from google.cloud.firestore_v1.watch import Watch
+from firebase_init import initialize_firebase
 
 # Local Imports
 import raw_developer
@@ -71,9 +72,7 @@ class FirebaseWorker:
     Monitors status == 'accepted' and triggers local GPU fulfillment.
     """
     def __init__(self, service_account: str, source_root: str, local_master_root: str):
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(service_account)
-            firebase_admin.initialize_app(cred)
+        initialize_firebase()
             
         self.db = firestore.client()
         self.mirror_manager = MirrorManager(source_root, local_master_root)

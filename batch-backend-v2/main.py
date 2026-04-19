@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import httpx
 import subprocess
 from contextlib import asynccontextmanager
 import asyncio
@@ -35,25 +36,17 @@ from database import SessionLocal, Media, Inference, Annotation, ModelRegistry, 
 
 
 # ─── Startup / Shutdown ──────────────────────────────────────────────
-import firebase_admin
-from firebase_admin import credentials
+from firebase_init import initialize_firebase
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run self-tests and initialize cloud telemetry on startup."""
-    # 1. Initialize Firebase Admin (Control Plane)
-    if not firebase_admin._apps:
-        try:
-            # Note: Path is loaded from .env.local via start_engine.sh
-            cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "./firebase-service-account.json")
-            if os.path.exists(cred_path):
-                cred = credentials.Certificate(cred_path)
-                firebase_admin.initialize_app(cred)
-                print("📡 [main] Firebase Control Plane Initialized.")
-            else:
-                print(f"⚠️ [main] Firebase Service Account missing at {cred_path}")
-        except Exception as e:
-            print(f"❌ [main] Firebase Init Failed: {e}")
+    # 1. Initialize Firebase Admin (Control Plane) — via singleton
+    try:
+        initialize_firebase()
+        print("📡 [main] Firebase Control Plane Initialized.")
+    except Exception as e:
+        print(f"❌ [main] Firebase Init Failed: {e}")
 
     # 2. Sequential Self-Tests
     results = batch_orchestrator.run_all_self_tests()
@@ -217,7 +210,6 @@ async def close_session(payload: SessionClosePayload, background_tasks: Backgrou
 
 
 # ─── Ollama Tags ────────────────────────────────────────────────────
-import httpx
 @app.get("/api/ollama-tags")
 async def get_ollama_tags():
     """Proxy local ollama models to the web frontend."""

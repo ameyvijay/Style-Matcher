@@ -84,7 +84,8 @@
   position: relative;
   width: 100%;
   max-width: 28rem;
-  aspect-ratio: 3 / 4;
+  /* height to accommodate 75vh image + metadata scroll */
+  height: 80vh;
   margin-bottom: 2rem;
 }
 

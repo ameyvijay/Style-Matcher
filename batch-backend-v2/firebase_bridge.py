@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
 import firebase_admin
-from firebase_admin import credentials, firestore, storage
+from firebase_admin import firestore, storage
+from firebase_init import initialize_firebase
 from google.cloud.firestore_v1.watch import Watch
 
 # Local imports
 from models import ImageAssessment, BatchResult
-from database import SessionLocal, Media, Annotation
+from database import SessionLocal, Media, Annotation, Inference
+from vector_store import ChromaManager
 
 class FirebaseBridge:
     """
@@ -33,6 +35,7 @@ class FirebaseBridge:
         self.service_account_path = service_account_path
         self.storage_bucket = storage_bucket
         self.active_listeners = {}
+        self._chroma = None  # Lazy-initialised ChromaManager
 
     def initialize(self) -> bool:
         """Initialize Firebase Admin SDK."""
@@ -40,14 +43,7 @@ class FirebaseBridge:
             return True
             
         try:
-            if not firebase_admin._apps:
-                if not os.path.exists(self.service_account_path):
-                    print(f"[firebase_bridge] Error: Service account not found at {self.service_account_path}")
-                    return False
-                cred = credentials.Certificate(self.service_account_path)
-                firebase_admin.initialize_app(cred, {
-                    'storageBucket': self.storage_bucket
-                })
+            initialize_firebase()
             
             self.db = firestore.client()
             # If the app was initialized elsewhere without a bucket, we MUST bind it explicitly
@@ -164,7 +160,14 @@ class FirebaseBridge:
                     'status': 'pending',
                     'score': photo.get('composite_score', 0),
                     'tier': photo.get('tier', 'review'),
-                    'timestamp': firestore.SERVER_TIMESTAMP
+                    'timestamp': firestore.SERVER_TIMESTAMP,
+                    # ── Visual RAG Schema (Phase B) ──────────────────
+                    'genre': photo.get('genre', 'unclassified'),
+                    'exif': photo.get('exif', {}),
+                    'embedding_id': None,
+                    'few_shot_ids': [],
+                    'prompt_version': 'v1.0',
+                    'presentation_timestamp': None,
                 })
 
             firestore_batch.commit()
@@ -210,10 +213,56 @@ class FirebaseBridge:
                                     'rejected': 'swipe_left_cull'
                                 }
                                 
+                                # ── Phase D: Retrieve embedding & push to ChromaDB ──
+                                embedding_id = None
+                                inference_row = (
+                                    db.query(Inference)
+                                    .filter(
+                                        Inference.media_id == media_record.id,
+                                        Inference.embedding_blob.isnot(None),
+                                    )
+                                    .order_by(Inference.created_at.desc())
+                                    .first()
+                                )
+
+                                if inference_row and inference_row.embedding_blob:
+                                    try:
+                                        embedding_vector = json.loads(inference_row.embedding_blob)
+                                        collection_name = (
+                                            "accepted_preferences"
+                                            if status == "accepted"
+                                            else "rejected_preferences"
+                                        )
+                                        # Lazy-init ChromaManager (thread-safe: PersistentClient is safe for reads/writes)
+                                        if self._chroma is None:
+                                            self._chroma = ChromaManager()
+                                        self._chroma.add_embedding(
+                                            collection_name=collection_name,
+                                            photo_hash=media_record.photo_hash,
+                                            embedding=embedding_vector,
+                                            metadata={
+                                                "filename": doc_data.get("filename", ""),
+                                                "action": action_mapping.get(status, status),
+                                            },
+                                        )
+                                        embedding_id = inference_row.id
+                                        print(f"[firebase_bridge] 🧠 Embedding → {collection_name} for {media_record.photo_hash}")
+                                    except (json.JSONDecodeError, KeyError) as vec_err:
+                                        print(f"[firebase_bridge] ⚠️ Embedding deserialization failed: {vec_err}")
+
+                                # Pull EXIF snapshot from Firestore doc (set during push_doppler_manifest)
+                                exif_snapshot_str = None
+                                exif_data = doc_data.get("exif")
+                                if exif_data:
+                                    exif_snapshot_str = json.dumps(exif_data) if isinstance(exif_data, dict) else str(exif_data)
+
                                 annotation = Annotation(
                                     media_id=media_record.id,
                                     user_id=doc_data.get("user_id", "guest"),
-                                    action=action_mapping.get(status, status)
+                                    action=action_mapping.get(status, status),
+                                    embedding_id=embedding_id,
+                                    exif_snapshot=exif_snapshot_str,
+                                    swipe_duration_ms=doc_data.get("swipe_duration_ms"),
                                 )
                                 db.add(annotation)
                                 db.commit()

@@ -69,18 +69,19 @@ export default function CullPage() {
     };
   }, []);
 
-  const handleSwipe = async (photoId, batchId, status) => {
+  const handleSwipe = async (photoId, batchId, status, swipeDurationMs) => {
     try {
       // 1. Update Photo Status (Firestore)
       const photoRef = doc(db, "photos", photoId);
       await updateDoc(photoRef, {
         status: status,
         user_id: "local_testing_user",
-        decided_at: new Date().toISOString()
+        decided_at: new Date().toISOString(),
+        swipe_duration_ms: swipeDurationMs || null
       });
 
       // 2. Local State Tracking for Stage 9 Handshake
-      if (status === "approved") {
+      if (status === "accepted") {
         const photo = photos.find(p => p.id === photoId);
         if (photo && photo.original_path) {
           setAcceptedPaths(prev => [...prev, photo.original_path]);
@@ -136,7 +137,7 @@ export default function CullPage() {
             <div className={styles.cullHeaderIcon}>
               <Sparkles size={20} color="white" />
             </div>
-            <span className={styles.cullHeaderTitle}>RLHF CULL</span>
+            <span className={styles.cullHeaderTitle}>HiLT Swipe ({photos.length})</span>
           </div>
           
           <div className={styles.cullHeaderRight}>
@@ -174,7 +175,7 @@ export default function CullPage() {
                   <SwipeCard 
                     key={photo.id}
                     photo={photo}
-                    onSwipe={(status) => handleSwipe(photo.id, photo.batch_id, status)}
+                    onSwipe={(status, swipeDurationMs) => handleSwipe(photo.id, photo.batch_id, status, swipeDurationMs)}
                   />
                 ))
               ) : (

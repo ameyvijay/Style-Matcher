@@ -295,6 +295,23 @@ class SelfTestResult:
     details: str = ""
 
 
+# ─── Visual RAG / RLHF Telemetry DTO ─────────────────────────────────
+@dataclass
+class SwipeTelemetry:
+    """
+    Per-swipe signal bundle captured at decision time.
+    Written to table_annotations and forwarded to the MLOps pipeline
+    as ground-truth for Visual RAG prompt optimisation and fine-tuning.
+    """
+    photo_hash: str = ""                    # SHA-256 of filename+size — joins to table_media
+    embedding_id: Optional[int] = None      # FK → ChromaDB / table_inferences embedding row
+    swipe_duration_ms: Optional[int] = None # Time from card render to swipe gesture (UX signal)
+    confidence_weight: Optional[float] = None  # Computed certainty of the decision (0.0–1.0)
+    exif_snapshot: Optional[str] = None     # JSON-serialised EXIF at swipe time (genre, ISO, FL)
+    genre: Optional[str] = None             # Inferred genre label (portrait, landscape, street…)
+    prompt_version: Optional[str] = None    # AI Coach prompt version that produced this assessment
+
+
 # ─── Supported Formats ───────────────────────────────────────────────
 RAW_EXTENSIONS = {'.arw', '.cr2', '.cr3', '.nef', '.orf', '.raf', '.rw2', '.dng'}
 JPEG_EXTENSIONS = {'.jpg', '.jpeg'}

@@ -95,6 +95,17 @@ class Annotation(Base):
     
     # Any textual additions the user made (e.g. tagging 'vacation')
     custom_tags = Column(Text, nullable=True)
+
+    # ── Visual RAG Telemetry (Phase B) ──────────────────────────────
+    # JSON-serialised EXIF snapshot captured at swipe time (genre, ISO, focal length, etc.)
+    exif_snapshot = Column(Text, nullable=True)
+    # FK reference to the ChromaDB / table_inferences embedding that was active at swipe time
+    embedding_id = Column(Integer, nullable=True)
+    # Milliseconds from card render to swipe gesture — UX confidence signal
+    swipe_duration_ms = Column(Integer, nullable=True)
+    # Computed certainty weight for RLHF dataset balancing (0.0 uncertain → 1.0 definitive)
+    confidence_weight = Column(Float, nullable=True)
+
     timestamp = Column(DateTime, default=func.now())
 
     media = relationship("Media", back_populates="annotations")
