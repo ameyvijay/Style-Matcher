@@ -106,6 +106,12 @@ class Annotation(Base):
     # Computed certainty weight for RLHF dataset balancing (0.0 uncertain → 1.0 definitive)
     confidence_weight = Column(Float, nullable=True)
 
+    # ── Manual Override Telemetry (Admin / HiLT correction layer) ───
+    # True when a human manually adjusted one or more AI scores before swiping
+    is_manual_override = Column(Boolean, default=False, nullable=False)
+    # JSON dict storing {"original": {...}, "updated": {...}} score deltas
+    score_delta = Column(Text, nullable=True)
+
     timestamp = Column(DateTime, default=func.now())
 
     media = relationship("Media", back_populates="annotations")

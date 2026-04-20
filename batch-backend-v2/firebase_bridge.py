@@ -158,15 +158,23 @@ class FirebaseBridge:
                     'original_path': photo['filepath'],
                     'rlhf_url': rlhf_url,
                     'status': 'pending',
+                    # ── Scores (both keys so frontend fallback works) ──
                     'score': photo.get('composite_score', 0),
+                    'composite_score': photo.get('composite_score', 0),
+                    'sharpness_score': photo.get('sharpness_score', None),
+                    'aesthetic_score': photo.get('aesthetic_score', None),
+                    'exposure_score': photo.get('exposure_score', None),
                     'tier': photo.get('tier', 'review'),
                     'timestamp': firestore.SERVER_TIMESTAMP,
-                    # ── Visual RAG Schema (Phase B) ──────────────────
+                    # ── AI Coach ──────────────────────────────────────
+                    'reasoning': photo.get('reasoning', ''),
+                    'coaching': photo.get('coaching', {}),
+                    'prompt_version': photo.get('prompt_version', 'v1.0'),
+                    # ── Visual RAG Schema (Phase B) ───────────────────
                     'genre': photo.get('genre', 'unclassified'),
                     'exif': photo.get('exif', {}),
                     'embedding_id': None,
                     'few_shot_ids': [],
-                    'prompt_version': 'v1.0',
                     'presentation_timestamp': None,
                 })
 

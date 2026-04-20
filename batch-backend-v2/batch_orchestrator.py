@@ -346,6 +346,7 @@ def stream_batch(
                     )
                     assessment.recovery_potential = quality.recovery_potential
                     assessment.recovery_notes = recovery_notes
+                    assessment.prompt_version = _prompt_version  # Phase F traceability
                     assessments.append(assessment)
                     print(f"[{quality.composite:.0f}%] ✅")
 
@@ -404,13 +405,36 @@ def stream_batch(
                 # Convert ImageAssessment objects back to dicts for JSON/Firestore compatibility
                 manifest_photos = []
                 for p in manifest_data["photos"]:
+                    # Serialize CoachingAdvice dataclass → plain dict for Firestore
+                    coaching_dict = {}
+                    if hasattr(p, "coaching") and p.coaching:
+                        coaching_obj = p.coaching
+                        coaching_dict = {
+                            "exposure_triangle": getattr(coaching_obj, "exposure_triangle", ""),
+                            "composition": getattr(coaching_obj, "composition", ""),
+                            "artistic": getattr(coaching_obj, "artistic", ""),
+                            "improvement_priority": getattr(coaching_obj, "improvement_priority", ""),
+                        }
                     manifest_photos.append({
+                        # ── Identity ───────────────────────────────────────────
                         "filename": p.filename,
                         "filepath": p.filepath,
-                        "enhanced_path": p.enhanced_path, 
-                        "rlhf_path": p.rlhf_path,         # Crucial: explicit proxy path for cloud swiper
+                        "enhanced_path": p.enhanced_path,
+                        "rlhf_path": p.rlhf_path,
+                        # ── AI Scores (all 4 needed by SwipeCard quality bars) ──
                         "composite_score": p.composite_score,
-                        "tier": p.tier
+                        "sharpness_score": p.sharpness_score,
+                        "aesthetic_score": p.aesthetic_score,
+                        "exposure_score": p.exposure_score,
+                        # ── Classification ─────────────────────────────────────
+                        "tier": p.tier,
+                        "genre": getattr(p, "genre", "general") or "general",
+                        # ── AI Coach ───────────────────────────────────────────
+                        "reasoning": getattr(p, "reasoning", ""),
+                        "coaching": coaching_dict,
+                        "prompt_version": getattr(p, "prompt_version", "v1.0") or "v1.0",
+                        # ── EXIF (needed by bento grid + extended rows) ─────────
+                        "exif": p.exif if isinstance(p.exif, dict) else {},
                     })
                 
                 yield _yield_log(f"Syncing {len(manifest_photos)} photos to cloud plane...", "sys")

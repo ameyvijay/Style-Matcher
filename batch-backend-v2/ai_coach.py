@@ -212,6 +212,7 @@ def assess_image(
         filepath=filepath,
         format=format_type,
         tier=quality.tier.value,
+        genre=genre,
         composite_score=quality.composite,
         sharpness_score=quality.sharpness,
         aesthetic_score=quality.aesthetic,

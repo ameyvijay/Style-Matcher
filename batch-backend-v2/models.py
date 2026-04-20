@@ -235,6 +235,7 @@ class ImageAssessment:
     filepath: str = ""
     format: str = ""               # "ARW", "JPEG", "HEIC", etc.
     tier: str = ""                  # Tier enum value
+    genre: str = "general"         # Detected photography genre (portrait, landscape, street…)
     composite_score: float = 0.0
     sharpness_score: float = 0.0
     aesthetic_score: float = 0.0
@@ -249,6 +250,7 @@ class ImageAssessment:
     rlhf_path: str = ""            # Path to low-res JPEG proxy for UI swiper
     exif: dict = field(default_factory=dict)
     processing_time: float = 0.0
+    prompt_version: str = "v1.0"   # AI Coach prompt version that produced this assessment
 
 
 # ─── Per-File Result (internal pipeline) ──────────────────────────────
