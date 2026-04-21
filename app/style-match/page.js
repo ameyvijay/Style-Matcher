@@ -84,7 +84,7 @@ export default function StyleMatch() {
     setStep(3);
   };
 
-  const drawCanvas = () => {
+  const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !targetImage) return;
 
@@ -99,11 +99,11 @@ export default function StyleMatch() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     };
     img.src = targetImage;
-  };
+  }, [targetImage, filters]);
 
   useEffect(() => {
     if (step === 3) drawCanvas();
-  }, [filters, targetImage, step]);
+  }, [drawCanvas, step]);
 
   const handleDownload = async () => {
     const canvas = canvasRef.current;

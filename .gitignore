@@ -70,3 +70,7 @@ chaos_test_assets/
 batch-backend-v2/*.pid
 batch-backend-v2/chaos_killswitch.json
 batch-backend-v2/batch_queue.json
+
+# SQLite WAL side-car files
+*.db-shm
+*.db-wal

@@ -122,7 +122,7 @@ export default function DashboardPage() {
 
                 <div className={styles.infoBox}>
                   <p className={styles.infoText}>
-                    "Higher F1 score indicates better balance between the model's ability to find good photos (Recall) and the reliability of those selections (Precision)."
+                    &quot;Higher F1 score indicates better balance between the model&apos;s ability to find good photos (Recall) and the reliability of those selections (Precision).&quot;
                   </p>
                 </div>
               </div>

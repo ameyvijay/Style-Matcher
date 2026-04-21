@@ -158,7 +158,12 @@ export default function SwipeCard({
   onSwipeStart,      // parent notifies sync hook to mark syncing
 }) {
   const [screen, setScreen] = useState("hero");
-  const cardPresentedAt = useRef(Date.now());
+  const cardPresentedAt = useRef(null);
+
+  useEffect(() => {
+    cardPresentedAt.current = Date.now();
+  }, []);
+
   const stopProp = useCallback((e) => e.stopPropagation(), []);
 
   // Physics-based drag

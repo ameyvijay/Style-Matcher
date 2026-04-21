@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import httpx
+import psutil
 import subprocess
 from contextlib import asynccontextmanager
 import asyncio
@@ -33,6 +34,31 @@ class SessionClosePayload(BaseModel):
 import batch_orchestrator
 import firebase_bridge
 from database import SessionLocal, Media, Inference, Annotation, ModelRegistry, SyncQueue
+
+# ─── Memory & VRAM Management ──────────────────────────────────────
+async def ensure_memory_headroom(threshold_pct: float = 80.0):
+    """
+    Adaptive Memory Guard: Check Unified Memory on M4.
+    If RAM usage is too high, proactively unload Ollama models.
+    """
+    mem = psutil.virtual_memory()
+    print(f"🧠 [Memory Guard] System RAM Usage: {mem.percent}%")
+    
+    if mem.percent > threshold_pct:
+        print(f"⚠️ [Memory Guard] Memory pressure high ({mem.percent}%). Evicting Ollama VLMs...")
+        ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(f"{ollama_url}/api/tags", timeout=2.0)
+                if res.status_code == 200:
+                    models = res.json().get("models", [])
+                    for m in models:
+                        await client.post(f"{ollama_url}/api/generate", json={"model": m["name"], "keep_alive": 0}, timeout=2.0)
+                        print(f"✅ [Memory Guard] Unloaded model: {m['name']}")
+        except Exception as e:
+            print(f"⚠️ [Memory Guard] Eviction failed: {e}")
+    else:
+        print("✅ [Memory Guard] Headroom sufficient.")
 
 
 # ─── Startup / Shutdown ──────────────────────────────────────────────
@@ -464,6 +490,9 @@ async def batch_process_stream(
     """
     Execute the batch pipeline and stream real-time JSON logs.
     """
+    # Proactively check memory to prevent M4 OOM during batch
+    await ensure_memory_headroom(threshold_pct=80.0)
+    
     return StreamingResponse(
         batch_orchestrator.stream_batch(target_folder, benchmark_folder, session_id),
         media_type="text/event-stream"
@@ -476,6 +505,9 @@ async def batch_process(request: BatchRequest):
     """
     Legacy endpoint that now just drains the stream and returns the final result.
     """
+    # Proactively check memory to prevent M4 OOM during batch
+    await ensure_memory_headroom(threshold_pct=80.0)
+
     # For now, we'll keep it simple for compatibility
     if not os.path.isdir(request.target_folder):
         return {"status": "error", "message": f"Folder not found: {request.target_folder}"}

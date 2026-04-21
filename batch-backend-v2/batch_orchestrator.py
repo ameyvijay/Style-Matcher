@@ -395,8 +395,9 @@ def stream_batch(
             # ─── Cloud Plane Handshake (GA Hybrid-Cloud) ──────────────────
             yield _yield_log("⚓ Initiating Cloud Plane Handshake...", "sys")
             
-            # Use absolute path to resolve service account correctly regardless of CWD
-            service_account = "/Users/shivamagent/Desktop/Style-Matcher/batch-backend-v2/firebase-service-account.json"
+            # Use relative path to resolve service account correctly
+            backend_dir = os.path.dirname(__file__)
+            service_account = os.path.join(backend_dir, "firebase-service-account.json")
             bridge = FirebaseBridge(service_account, "style-matcher-9480d.firebasestorage.app")
             
             if bridge.initialize():

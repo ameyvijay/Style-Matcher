@@ -33,3 +33,4 @@ pytest
 httpx
 pytest-asyncio
 sqlalchemy
+psutil

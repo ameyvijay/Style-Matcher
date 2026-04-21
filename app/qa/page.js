@@ -176,7 +176,7 @@ export default function QAPage() {
               </div>
               <h2 className={styles.emptyTitle}>The bin is empty</h2>
               <p className={styles.emptyDesc}>
-                No rejected photos found. Either you're very happy with the model's choices, or you haven't started culling yet.
+                No rejected photos found. Either you&apos;re very happy with the model&apos;s choices, or you haven&apos;t started culling yet.
               </p>
               <Link href="/cull" className={`btn btn-primary ${styles.returnBtn}`}>
                 Return to Culling

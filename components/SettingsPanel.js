@@ -38,7 +38,7 @@ export default function SettingsPanel({
       }
     }
     if (provider === "ollama") fetchModels();
-  }, [provider]);
+  }, [provider, ollamaModel, setOllamaModel, saveSettings]);
   return (
     <div className="glass-panel" style={{ padding: "2rem" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.5rem" }}>
