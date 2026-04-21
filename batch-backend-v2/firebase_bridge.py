@@ -202,85 +202,105 @@ class FirebaseBridge:
             
         def on_snapshot(col_snapshot, changes, read_time):
             for change in changes:
-                if change.type.name == 'MODIFIED':
-                    doc_data = change.document.to_dict()
-                    status = doc_data.get('status')
-                    if status in ['accepted', 'rejected']:
-                        print(f"[firebase_bridge] New decision for {doc_data.get('filename')}: {status}")
-                        
-                        # MLOps: Write to table_annotations
+                if change.type.name != 'MODIFIED':
+                    continue
+
+                doc_data = change.document.to_dict()
+                status = doc_data.get('status')
+                if status not in ['accepted', 'rejected']:
+                    continue
+
+                filename = doc_data.get('filename', '?')
+                print(f"[firebase_bridge] Decision received — {filename}: {status}")
+
+                action_mapping = {
+                    'accepted': 'swipe_right_keeper',
+                    'rejected': 'swipe_left_cull',
+                }
+                mapped_action = action_mapping[status]
+
+                # ── Thread-safe, scoped DB session ────────────────────────────────
+                db = SessionLocal()
+                try:
+                    media_record = db.query(Media).filter(
+                        Media.file_path == doc_data.get("original_path")
+                    ).first()
+
+                    if not media_record:
+                        print(f"[firebase_bridge] ⚠️  No Media record for path: {doc_data.get('original_path')}")
+                        continue
+
+                    # ── Idempotency guard: skip if annotation already written ──────
+                    existing = db.query(Annotation).filter(
+                        Annotation.media_id == media_record.id,
+                        Annotation.action == mapped_action,
+                    ).first()
+                    if existing:
+                        print(f"[firebase_bridge] ℹ️  Annotation already logged for media_id={media_record.id}. Skipping.")
+                        continue
+
+                    # ── Phase D: Retrieve embedding & push to ChromaDB ────────────
+                    embedding_id = None
+                    inference_row = (
+                        db.query(Inference)
+                        .filter(
+                            Inference.media_id == media_record.id,
+                            Inference.embedding_blob.isnot(None),
+                        )
+                        .order_by(Inference.created_at.desc())
+                        .first()
+                    )
+
+                    if inference_row and inference_row.embedding_blob:
                         try:
-                            # DB session handled per callback to avoid threading issues
-                            db = SessionLocal()
-                            # Query the media
-                            media_record = db.query(Media).filter(Media.file_path == doc_data.get("original_path")).first()
-                            
-                            if media_record:
-                                action_mapping = {
-                                    'accepted': 'swipe_right_keeper',
-                                    'rejected': 'swipe_left_cull'
-                                }
-                                
-                                # ── Phase D: Retrieve embedding & push to ChromaDB ──
-                                embedding_id = None
-                                inference_row = (
-                                    db.query(Inference)
-                                    .filter(
-                                        Inference.media_id == media_record.id,
-                                        Inference.embedding_blob.isnot(None),
-                                    )
-                                    .order_by(Inference.created_at.desc())
-                                    .first()
-                                )
+                            embedding_vector = json.loads(inference_row.embedding_blob)
+                            collection_name = (
+                                "accepted_preferences" if status == "accepted" else "rejected_preferences"
+                            )
+                            # Lazy-init ChromaManager (thread-safe: PersistentClient is safe for concurrent access)
+                            if self._chroma is None:
+                                self._chroma = ChromaManager()
+                            self._chroma.add_embedding(
+                                collection_name=collection_name,
+                                photo_hash=media_record.photo_hash,
+                                embedding=embedding_vector,
+                                metadata={
+                                    "filename": doc_data.get("filename", ""),
+                                    "action": mapped_action,
+                                },
+                            )
+                            embedding_id = inference_row.id
+                            print(f"[firebase_bridge] 🧠 Embedding → {collection_name} for {media_record.photo_hash}")
+                        except (json.JSONDecodeError, KeyError) as vec_err:
+                            print(f"[firebase_bridge] ⚠️  Embedding deserialization failed: {vec_err}")
 
-                                if inference_row and inference_row.embedding_blob:
-                                    try:
-                                        embedding_vector = json.loads(inference_row.embedding_blob)
-                                        collection_name = (
-                                            "accepted_preferences"
-                                            if status == "accepted"
-                                            else "rejected_preferences"
-                                        )
-                                        # Lazy-init ChromaManager (thread-safe: PersistentClient is safe for reads/writes)
-                                        if self._chroma is None:
-                                            self._chroma = ChromaManager()
-                                        self._chroma.add_embedding(
-                                            collection_name=collection_name,
-                                            photo_hash=media_record.photo_hash,
-                                            embedding=embedding_vector,
-                                            metadata={
-                                                "filename": doc_data.get("filename", ""),
-                                                "action": action_mapping.get(status, status),
-                                            },
-                                        )
-                                        embedding_id = inference_row.id
-                                        print(f"[firebase_bridge] 🧠 Embedding → {collection_name} for {media_record.photo_hash}")
-                                    except (json.JSONDecodeError, KeyError) as vec_err:
-                                        print(f"[firebase_bridge] ⚠️ Embedding deserialization failed: {vec_err}")
+                    # ── EXIF snapshot from Firestore doc ─────────────────────────
+                    exif_data = doc_data.get("exif")
+                    exif_snapshot_str = (
+                        json.dumps(exif_data) if isinstance(exif_data, dict) else str(exif_data)
+                    ) if exif_data else None
 
-                                # Pull EXIF snapshot from Firestore doc (set during push_doppler_manifest)
-                                exif_snapshot_str = None
-                                exif_data = doc_data.get("exif")
-                                if exif_data:
-                                    exif_snapshot_str = json.dumps(exif_data) if isinstance(exif_data, dict) else str(exif_data)
+                    # ── Write Annotation ──────────────────────────────────────────
+                    annotation = Annotation(
+                        media_id=media_record.id,
+                        user_id=doc_data.get("user_id", "guest"),
+                        action=mapped_action,
+                        embedding_id=embedding_id,
+                        exif_snapshot=exif_snapshot_str,
+                        swipe_duration_ms=doc_data.get("swipe_duration_ms"),
+                    )
+                    db.add(annotation)
+                    db.commit()
+                    print(f"[firebase_bridge] ✅ Annotation saved for media_id={media_record.id} ({mapped_action})")
 
-                                annotation = Annotation(
-                                    media_id=media_record.id,
-                                    user_id=doc_data.get("user_id", "guest"),
-                                    action=action_mapping.get(status, status),
-                                    embedding_id=embedding_id,
-                                    exif_snapshot=exif_snapshot_str,
-                                    swipe_duration_ms=doc_data.get("swipe_duration_ms"),
-                                )
-                                db.add(annotation)
-                                db.commit()
-                                print(f"[firebase_bridge] Saved annotation to local DB for {media_record.id}")
-                            db.close()
-                        except Exception as e:
-                            print(f"[firebase_bridge] Failed to log annotation to DB: {e}")
-                        
-                        if on_decision_callback:
-                            on_decision_callback(doc_data)
+                except Exception as e:
+                    db.rollback()
+                    print(f"[firebase_bridge] ❌ DB transaction failed: {e}")
+                finally:
+                    db.close()  # ← always reached, even on exception
+
+                if on_decision_callback:
+                    on_decision_callback(doc_data)
 
         # Watch the 'photos' collection for decisions
         query = self.db.collection('photos').where('status', 'in', ['accepted', 'rejected'])
@@ -294,9 +314,33 @@ class FirebaseBridge:
             watch.unsubscribe()
         self.active_listeners = {}
 
+
+# ─── Module-level Singleton Factory ─────────────────────────────────────────
+_BRIDGE_SINGLETON: "FirebaseBridge | None" = None
+
+def get_bridge() -> "FirebaseBridge":
+    """
+    Return (or lazily create) the module-level FirebaseBridge singleton.
+    Uses __file__-relative paths so the service account resolves correctly
+    regardless of the CWD from which uvicorn is launched.
+    """
+    global _BRIDGE_SINGLETON
+    if _BRIDGE_SINGLETON is None:
+        _BRIDGE_SINGLETON = FirebaseBridge(
+            service_account_path=os.path.join(
+                os.path.dirname(__file__), "firebase-service-account.json"
+            ),
+            storage_bucket=os.getenv(
+                "FIREBASE_STORAGE_BUCKET",
+                "style-matcher-9480d.firebasestorage.app",
+            ),
+        )
+    return _BRIDGE_SINGLETON
+
+
 if __name__ == "__main__":
     # Self-test snippet (requires service account)
-    bridge = FirebaseBridge("firebase-service-account.json", "style-matcher-9480d.firebasestorage.app")
+    bridge = get_bridge()
     if bridge.initialize():
         print("Self-test: Connection OK")
     else:

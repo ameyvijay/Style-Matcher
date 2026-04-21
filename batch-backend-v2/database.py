@@ -13,7 +13,21 @@ from sqlalchemy.sql import func
 DB_PATH = os.path.join(os.path.dirname(__file__), "mlops_registry.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
-engine = create_engine(DATABASE_URL, echo=False)
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args={"check_same_thread": False, "timeout": 15},
+)
+
+# Enable WAL mode so the Firestore callback thread and FastAPI request threads
+# can read/write concurrently without "Database is locked" errors.
+from sqlalchemy import event as _sa_event
+
+@_sa_event.listens_for(engine, "connect")
+def _set_sqlite_wal(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

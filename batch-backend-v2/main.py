@@ -50,7 +50,24 @@ async def lifespan(app: FastAPI):
 
     # 2. Sequential Self-Tests
     results = batch_orchestrator.run_all_self_tests()
-    yield
+
+    # 3. Start Firestore Decision Listener (non-blocking — runs in Firestore-managed thread)
+    _bridge = firebase_bridge.get_bridge()
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _bridge.start_listening, None)
+        print("👂 [main] Firestore Decision Listener started.")
+    except Exception as e:
+        print(f"⚠️  [main] Could not start Firestore listener: {e}")
+
+    yield  # ← application runs here
+
+    # 4. Graceful shutdown — unsubscribe all Firestore watchers
+    try:
+        _bridge.stop_listening()
+        print("🛑 [main] Firestore listener stopped cleanly.")
+    except Exception as e:
+        print(f"⚠️  [main] Listener stop error (non-fatal): {e}")
 
 
 app = FastAPI(
@@ -71,10 +88,9 @@ app.add_middleware(
 )
 
 # Mount static media folders
-# /rlhf-media points to the batch-local "For RLHF input" directory
-# This allows the PWA to pull images if they are hosted on the same network
-# (Firebase Storage is the primary path for cross-network access)
-app.mount("/rlhf-media", StaticFiles(directory="/Users/shivamagent/Desktop/Style-Matcher"), name="rlhf-media")
+# /rlhf-media points to the project root directory
+project_root = os.path.dirname(os.path.dirname(__file__))
+app.mount("/rlhf-media", StaticFiles(directory=project_root), name="rlhf-media")
 
 
 # ─── Manifest & Memory Gatekeeper (M4 MPS) ────────────────────────
@@ -214,8 +230,9 @@ async def close_session(payload: SessionClosePayload, background_tasks: Backgrou
 async def get_ollama_tags():
     """Proxy local ollama models to the web frontend."""
     try:
+        ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
         async with httpx.AsyncClient() as client:
-            res = await client.get("http://127.0.0.1:11434/api/tags", timeout=3.0)
+            res = await client.get(f"{ollama_url}/api/tags", timeout=3.0)
             if res.status_code == 200:
                 data = res.json()
                 models = [model["name"] for model in data.get("models", [])]
