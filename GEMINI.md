@@ -45,41 +45,37 @@ npm run dev
 ## 📐 Development Conventions
 
 ### Pipeline Pattern (Backend)
-All batch processing logic is encapsulated in `pipeline/stages/`. When adding new image processing steps:
-1. Create a new class inheriting from `ProcessingStage`.
+All batch processing logic is encapsulated in `pipeline/`. The engine uses a **Modular Pipeline Pattern** with isolated states (Discovery, Assessment, Enhancement, Embedding, Coaching, CloudSync).
+1. Create a new class in `pipeline/stages/` inheriting from `ProcessingStage`.
 2. Implement `execute(ctx: PipelineContext)`.
-3. Register the stage in `batch_orchestrator.py`.
+3. The `PipelineRunner` manages the execution flow, abort signals, and atomic rollbacks.
 
 ### Telemetry & Logging
-- **SSE is deprecated.** The system uses **Durable File-Based Logging**.
-- Logs are written to `logs/{session_id}.jsonl` by `PipelineRunner._emit()`.
-- Frontend polls `GET /api/logs/{session_id}` for real-time terminal updates.
+- **SSE to Polling Migration**: The engine uses a **Durable File-Based Polling** pattern. 
+- Logs are dual-written to `logs/{session_id}.jsonl` and the stream generator.
+- The frontend `BatchStudio` polls `GET /api/logs/{session_id}` for real-time updates.
+- `batch_status` (running, completed, failed) is tracked in the `SESSION_REGISTRY`.
 
 ### M4-Native Optimizations
 - **MPS (Metal Performance Shaders)**: Always use `torch.device("mps")` for GPU acceleration on Mac.
-- **Memory Guard**: The `ensure_memory_headroom` utility monitors RAM usage and unloads Ollama models if usage exceeds 80%.
+- **Memory Guard**: The `ensure_memory_headroom` utility is called as a "pre-flight" check before the discovery stage begins.
 
 ### Cloud Synchronization
 - Use `firebase_bridge.py` for all Firestore/Storage interactions.
-- The listener processes both `ADDED` and `MODIFIED` events to ensure offline-first reliability.
-- **Janitor Service**: Automatically purges Firestore documents > 10 days old on boot to stay within free-tier limits.
+- Added **Decision Listener**: Processes both `ADDED` and `MODIFIED` events to handle decisions made while the engine was offline.
+- **Janitor Service**: Automatically purges Firestore documents > 10 days old on boot (Free Tier Guard).
+- **Decision Reversal**: Atomic reversal of swipe decisions via `POST /api/decision/reverse`.
 
----
-
-### Checkpoints
-- **2026-04-21**: Persistent Stack Orchestration (PM2) and Admin Console UI Refactor complete. 
-    - `ecosystem.config.js` implemented.
-    - `/health` endpoint added to `main.py`.
-    - `app/landing/page.js` refactored to Tabbed Admin Console.
-    - `components/SwipeCard.js` updated with Skip-gesture stubs.
-    - **Current Status**: All services online, stable, and GitHub synced.
+### Deduplication & MLOps
+- **Media Hashing**: Files are deduped in `EnhancementStage` using a SHA-256 hash of `filename + filesize`. Existing records in the `Media` table are reused.
+- **Inference History**: Rerunning the engine on the same folder appends new `Inference` records. The Intelligence Dashboard uses the **latest** inference/annotation pair for its calculations.
 
 ---
 
 ## 📁 Directory Structure
 - `/app`: Next.js App Router pages (Dashboard, Cull, Style Match).
 - `/batch-backend-v2`: FastAPI source code.
-- `/batch-backend-v2/pipeline`: Refactored processing stages.
+- `/batch-backend-v2/pipeline`: Refactored processing stages (Discovery, Assessment, Enhancement, Embedding, Coaching, CloudSync).
 - `/components`: Shared React components (SwipeCard, Navigation).
 - `/lib/services`: Frontend logic (AI Engine with Circuit Breaker).
 - `/.legacy`: Deprecated files and logs with 0 impact on current code.
@@ -90,3 +86,4 @@ All batch processing logic is encapsulated in `pipeline/stages/`. When adding ne
 - **Gemini Model**: Use `gemini-1.5-flash` (do not use v2.5 placeholder).
 - **SQLite Concurrency**: Engine must use `check_same_thread=False` and `PRAGMA journal_mode=WAL` due to background Firestore threads.
 - **Nomenclature**: UI uses `accepted/rejected`, Backend maps to `swipe_right_keeper/swipe_left_cull`.
+- **Rejected Folder**: The `/Rejected` folder logic has been removed; culled files remain untouched in the source directory.
