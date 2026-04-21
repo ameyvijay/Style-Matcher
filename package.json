@@ -3,11 +3,16 @@
   "version": "2.1.0-M4-Native",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "next build --webpack",
+    "dev": "next dev",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "engine:start": "pm2 start ecosystem.config.js",
+    "engine:stop": "pm2 stop ecosystem.config.js",
+    "engine:restart": "pm2 restart ecosystem.config.js",
+    "engine:status": "pm2 status",
+    "engine:logs": "pm2 logs"
   },
   "dependencies": {
     "@google/genai": "^1.48.0",
@@ -27,6 +32,7 @@
   "devDependencies": {
     "@playwright/test": "^1.48.2",
     "eslint": "^8",
-    "eslint-config-next": "15.0.3"
+    "eslint-config-next": "15.0.3",
+    "pm2": "^6.0.14"
   }
 }

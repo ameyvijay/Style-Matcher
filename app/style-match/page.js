@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { UploadCloud, Image as ImageIcon, Download, Settings2, Loader2, Key, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 

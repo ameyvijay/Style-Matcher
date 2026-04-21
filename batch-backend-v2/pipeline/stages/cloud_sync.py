@@ -151,11 +151,14 @@ class CloudSyncStage(ProcessingStage):
             f"Batch Complete. ({len(ctx.assessments)} photos assessed)",
             "done",
             {
+                "total_scanned": ctx.result.total_scanned,
                 "portfolio": ctx.result.portfolio,
                 "keepers": ctx.result.keepers,
                 "review": ctx.result.review,
                 "culled": ctx.result.culled,
                 "recoverable": ctx.result.recoverable,
+                "enhanced": ctx.result.enhanced,
+                "denoised": ctx.result.denoised,
                 "processing_time": ctx.result.processing_time,
             },
         )

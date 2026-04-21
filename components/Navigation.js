@@ -6,17 +6,7 @@ import { Menu, X, Lock, Unlock, Image, Camera, Activity, Settings, LayoutDashboa
 
 export default function Navigation() {
   const [isOpen, setIsOpen] = useState(false);
-  const [isLocal] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const hostname = window.location.hostname;
-    return (
-      hostname === "localhost" || 
-      hostname === "127.0.0.1" || 
-      hostname.endsWith(".local") || 
-      hostname.startsWith("192.168.") || 
-      hostname.startsWith("10.0.")
-    );
-  });
+  const [isLocal, setIsLocal] = useState(false);
   const [engineOnline, setEngineOnline] = useState(false);
 
   const checkEngine = async () => {
@@ -30,14 +20,24 @@ export default function Navigation() {
   };
 
   useEffect(() => {
+    // Determine isLocal on client mount to prevent hydration mismatch
+    const hostname = window.location.hostname;
+    const local = (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname.endsWith(".local") ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("10.0.")
+    );
+    setIsLocal(local);
+
     // Initial check
     checkEngine();
-    
+
     // Heartbeat polling
     const timer = setInterval(checkEngine, 10000);
     return () => clearInterval(timer);
   }, []);
-
   const toggleMenu = () => setIsOpen(!isOpen);
 
   // Link configs

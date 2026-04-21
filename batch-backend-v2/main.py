@@ -132,6 +132,22 @@ app.add_middleware(
 project_root = os.path.dirname(os.path.dirname(__file__))
 app.mount("/rlhf-media", StaticFiles(directory=project_root), name="rlhf-media")
 
+@app.get("/health")
+async def health_check():
+    """
+    Standard health check for PM2 orchestration and local monitoring.
+    Includes M4 MPS availability and memory pressure checks.
+    """
+    import psutil
+    import time
+    return {
+        "status": "ok",
+        "timestamp": time.time(),
+        "uptime": psutil.boot_time(),
+        "memory_usage_percent": psutil.virtual_memory().percent,
+        "mps_available": torch.backends.mps.is_available()
+    }
+
 
 # ─── Manifest & Memory Gatekeeper (M4 MPS) ────────────────────────
 @app.get("/api/batch-queue")

@@ -440,7 +440,7 @@ export default function BatchStudio() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "2rem", animation: "fadeIn 0.5s ease-out" }}>
                         <div style={{ display: "flex", padding: "1rem", background: "rgba(0,255,100,0.1)", border: "1px solid rgba(0,255,100,0.3)", borderRadius: "8px", gap: "1rem", alignItems: "center", color: "#aaffaa" }}>
                             <CheckCircle size={30} /> 
-                            <span style={{ fontSize: "1.2rem", fontWeight: "600" }}>Antigravity Engine v2.0 — Completed in {results.metrics?.processing_time || 0}s</span>
+                            <span style={{ fontSize: "1.2rem", fontWeight: "600" }}>Antigravity Engine v2.1 — Completed in {results.metrics?.processing_time || 0}s</span>
                         </div>
 
                         {/* Tier Breakdown Cards */}
@@ -479,7 +479,6 @@ export default function BatchStudio() {
                                     {results.mode !== "scan_only" && (
                                         <li style={{ color: "#88ccff" }}><strong>AI Denoised:</strong> {results.metrics?.denoised || 0}</li>
                                     )}
-                                    <li style={{ color: "#ff8888" }}><strong>{results.mode === "scan_only" ? "Would Cull:" : "Moved to /Rejected:"}</strong> {results.metrics?.culled || 0}</li>
                                     {(results.metrics?.recoverable || 0) > 0 && (
                                         <li style={{ color: "#a78bfa" }}><strong>🔧 Recoverable:</strong> {results.metrics?.recoverable} <em>(sharp but poorly exposed)</em></li>
                                     )}
@@ -534,7 +533,6 @@ export default function BatchStudio() {
                                     <h3>Output Locations</h3>
                                     <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", marginTop: "1rem", lineHeight: 1.6 }}>
                                         📂 <strong>/Enhanced/</strong> — Master JPEGs developed from keepers<br/>
-                                        📂 <strong>/Rejected/</strong> — Culled photos (moved, not deleted)<br/>
                                         📄 <strong>batch_report.json</strong> — AI Coach telemetry for LLM ingestion
                                     </p>
                                     <p style={{ fontSize: "0.8rem", color: "#888", marginTop: "1rem", fontStyle: "italic", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "0.8rem" }}>

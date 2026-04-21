@@ -8,14 +8,20 @@ import ToolCard from "../../components/ToolCard";
 import SettingsPanel from "../../components/SettingsPanel";
 
 export default function LandingPage() {
-  const [provider, setProvider] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("ai_provider") : null) || "gemini");
-  const [geminiKey, setGeminiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("gemini_key") : null) || "");
-  const [ollamaUrl, setOllamaUrl] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("ollama_url") : null) || process.env.NEXT_PUBLIC_OLLAMA_URL || "http://localhost:11434");
-  const [ollamaModel, setOllamaModel] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("ollama_model") : null) || "gemma4:e4b");
-  const [benchmarkFolder, setBenchmarkFolder] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("benchmark_folder") : null) || "");
+  const [provider, setProvider] = useState("gemini");
+  const [geminiKey, setGeminiKey] = useState("");
+  const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
+  const [ollamaModel, setOllamaModel] = useState("gemma4:e4b");
+  const [benchmarkFolder, setBenchmarkFolder] = useState("");
 
   useEffect(() => {
-    // Sync with localStorage if it changed in another tab (optional but good)
+    // Initialize state from localStorage after mount
+    setProvider(localStorage.getItem("ai_provider") || "gemini");
+    setGeminiKey(localStorage.getItem("gemini_key") || "");
+    setOllamaUrl(localStorage.getItem("ollama_url") || process.env.NEXT_PUBLIC_OLLAMA_URL || "http://localhost:11434");
+    setOllamaModel(localStorage.getItem("ollama_model") || "gemma4:e4b");
+    setBenchmarkFolder(localStorage.getItem("benchmark_folder") || "");
+
     const handleStorage = () => {
       setProvider(localStorage.getItem("ai_provider") || "gemini");
       setGeminiKey(localStorage.getItem("gemini_key") || "");
