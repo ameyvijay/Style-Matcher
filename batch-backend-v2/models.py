@@ -16,6 +16,7 @@ class BatchRequest(BaseModel):
     """Incoming request from the frontend."""
     target_folder: str
     benchmark_folder: Optional[str] = None
+    session_id: Optional[str] = None
     api_key: Optional[str] = None
     provider: str = "gemini"
     ollama_url: str = "http://localhost:11434"

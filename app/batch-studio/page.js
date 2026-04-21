@@ -189,41 +189,12 @@ export default function BatchStudio() {
                 throw new Error(errData.detail || `Connection failed: ${response.statusText}`);
             }
             
+            // Fire-and-forget: the polling hook takes over from here
             const data = await response.json();
-            setResults({ metrics: data, mode: "batch" });
-
-            /* ⚠️ SSE Elimination: Commenting out chunk reader. 
-               The frontend should now fetch batch_queue.json via useEffect.
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split("\n").filter(l => l.trim() !== "");
-
-                for (const line of lines) {
-                    try {
-                        const event = JSON.parse(line);
-                        setLogs(prev => [...prev, event]);
-                        
-                        if (event.type === "done") {
-                            setResults({ metrics: event.data, mode: "batch" });
-                            setIsProcessing(false);
-                        }
-                        if (event.type === "warn") setIsRollingBack(true);
-                        if (event.type === "revert") setIsRollingBack(true);
-                    } catch (e) {
-                        console.error("Malformed log chunk", line);
-                    }
-                }
+            if (data.status === "error") {
+                throw new Error(data.message);
             }
-            */
-            // Fallback: Immediate completion state for manifest-based logic
-            setLogs(prev => [...prev, { timestamp: Date.now()/1000, type: "sys", message: "Batch initiated. Check Cull screen for live progress via manifest." }]);
-            setIsProcessing(false);
+            // isProcessing stays true — polling useEffect will handle completion
         } catch (err) {
             console.error("Batch error:", err);
             setError(err.message);
@@ -239,6 +210,57 @@ export default function BatchStudio() {
             console.error("Stop request failed", err);
         }
     };
+
+    // 3. Log Polling Hook (replaces brittle SSE StreamingResponse)
+    // Polls GET /api/logs/{session_id} every 1s while processing.
+    // Uses batch_status metadata (Gemini Extension #3) to manage lifecycle.
+    useEffect(() => {
+        if (!isProcessing) return;
+        let isMounted = true;
+        let linesSeen = 0;
+
+        const poll = async () => {
+            try {
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const res = await fetch(`${baseUrl}/api/logs/${sessionId}?after=${linesSeen}`);
+                if (!res.ok) return; // Session not registered yet — retry next interval
+                const data = await res.json();
+
+                if (isMounted && data.logs.length > 0) {
+                    setLogs(prev => [...prev, ...data.logs]);
+                    linesSeen = data.total;
+
+                    // Check for rollback events
+                    const hasWarn = data.logs.some(l => l.type === "warn" || l.type === "revert");
+                    if (hasWarn) setIsRollingBack(true);
+
+                    // Check for completion via "done" event
+                    const doneEvent = data.logs.find(l => l.type === "done");
+                    if (doneEvent) {
+                        setResults({ metrics: doneEvent.data, mode: "batch" });
+                        setIsProcessing(false);
+                    }
+                }
+
+                // Gemini Extension #3: Use batch_status for clean lifecycle management
+                if (isMounted && data.batch_status === "completed" && !data.logs.find(l => l.type === "done")) {
+                    // Edge case: status completed but no done event in this delta
+                    setIsProcessing(false);
+                }
+                if (isMounted && data.batch_status === "failed") {
+                    setError("Pipeline failed. Check the terminal output for details.");
+                    setIsProcessing(false);
+                }
+            } catch (err) {
+                // Network error during polling — non-fatal, retry next interval
+                console.warn("Log poll error:", err);
+            }
+        };
+
+        const intervalId = setInterval(poll, 1000); // 1s polling
+        poll(); // Immediate first poll
+        return () => { isMounted = false; clearInterval(intervalId); };
+    }, [isProcessing, sessionId]);
 
     const runScan = async () => {
         if (!targetFolder) {

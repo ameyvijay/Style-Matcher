@@ -19,9 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 import json
+import threading
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import numpy as np
 import torch
 from PIL import Image
@@ -30,6 +31,10 @@ from models import BatchRequest, BatchResult
 
 class SessionClosePayload(BaseModel):
     accepted_file_paths: List[str]
+
+class DecisionReversal(BaseModel):
+    photo_hash: str
+    user_id: str = "guest"
 
 import batch_orchestrator
 import firebase_bridge
@@ -85,6 +90,15 @@ async def lifespan(app: FastAPI):
         print("👂 [main] Firestore Decision Listener started.")
     except Exception as e:
         print(f"⚠️  [main] Could not start Firestore listener: {e}")
+
+    # 4. Run Janitor Service on boot (free tier guard)
+    try:
+        from services.janitor import JanitorService
+        janitor = JanitorService(max_age_days=10)
+        await janitor.run_cleanup()
+        print("🧹 [main] Janitor cleanup complete.")
+    except Exception as e:
+        print(f"⚠️ [main] Janitor failed (non-fatal): {e}")
 
     yield  # ← application runs here
 
@@ -480,7 +494,57 @@ async def stop_batch(session_id: str = "default"):
     return {"status": "stop_requested", "session_id": session_id}
 
 
-# ─── Batch Processing (Streaming) ──────────────────────────────────
+# ─── Log Polling (SSE Replacement) ─────────────────────────────────
+@app.get("/api/logs/{session_id}")
+async def get_session_logs(session_id: str, after: int = 0):
+    """
+    Polling endpoint: return log events for session_id starting from line `after`.
+    Replaces the brittle StreamingResponse SSE pattern.
+
+    Gemini Extension Refinement #3: includes batch_status field
+    (running, completed, failed) so the frontend can manage the
+    polling lifecycle without relying on finding a 'done' event.
+
+    Returns:
+        { "logs": [...events], "total": int, "batch_status": str }
+    """
+    from pipeline.pipeline_runner import SESSION_REGISTRY
+
+    session = SESSION_REGISTRY.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+
+    log_path = session["log_path"]
+    batch_status = session.get("status", "running")  # Gemini Extension #3
+
+    if not os.path.exists(log_path):
+        return {"logs": [], "total": 0, "batch_status": batch_status}
+
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+    except Exception:
+        return {"logs": [], "total": 0, "batch_status": batch_status}
+
+    # Return delta from `after` line
+    delta_lines = all_lines[after:]
+    events = []
+    for line in delta_lines:
+        line = line.strip()
+        if line:
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+
+    return {
+        "logs": events,
+        "total": len(all_lines),
+        "batch_status": batch_status,
+    }
+
+
+# ─── Batch Processing (Streaming — Legacy, still functional) ──────
 @app.get("/api/batch-process-stream")
 async def batch_process_stream(
     target_folder: str, 
@@ -489,8 +553,8 @@ async def batch_process_stream(
 ):
     """
     Execute the batch pipeline and stream real-time JSON logs.
+    Preserved for backward compatibility but the frontend now uses polling.
     """
-    # Proactively check memory to prevent M4 OOM during batch
     await ensure_memory_headroom(threshold_pct=80.0)
     
     return StreamingResponse(
@@ -499,28 +563,127 @@ async def batch_process_stream(
     )
 
 
-# ─── Batch Processing (Legacy Sync) ─────────────────────────────────
+# ─── Batch Processing (Background Thread + Polling) ────────────────
+def _run_batch_in_background(target_folder: str, benchmark_folder: str, session_id: str):
+    """Run the pipeline in a background thread, draining the generator to persist logs."""
+    try:
+        for _ in batch_orchestrator.stream_batch(target_folder, benchmark_folder, session_id):
+            pass  # _emit() inside PipelineRunner writes each event to logs.jsonl
+    except Exception as e:
+        print(f"❌ [Background Batch] Error: {e}")
+        from pipeline.pipeline_runner import SESSION_REGISTRY
+        if session_id in SESSION_REGISTRY:
+            SESSION_REGISTRY[session_id]["status"] = "failed"
+
+
 @app.post("/api/batch-process")
 async def batch_process(request: BatchRequest):
     """
-    Legacy endpoint that now just drains the stream and returns the final result.
+    Start batch processing in a background thread.
+    The frontend polls GET /api/logs/{session_id} for progress.
     """
-    # Proactively check memory to prevent M4 OOM during batch
     await ensure_memory_headroom(threshold_pct=80.0)
 
-    # For now, we'll keep it simple for compatibility
     if not os.path.isdir(request.target_folder):
         return {"status": "error", "message": f"Folder not found: {request.target_folder}"}
-    
-    # We'll just call the streamer and collect the last 'done' event
-    final_result = {}
-    for event_str in batch_orchestrator.stream_batch(request.target_folder, request.benchmark_folder):
-        event = json.loads(event_str.strip())
-        if event["type"] == "error":
-            return {"status": "error", "message": event["message"]}
-        if event["type"] == "done":
-            final_result = event["data"]
-            break
-            
-    return {"status": "success", "metrics": final_result}
+
+    session_id = request.session_id or "default"
+    t = threading.Thread(
+        target=_run_batch_in_background,
+        args=(request.target_folder, request.benchmark_folder, session_id),
+        daemon=True,
+    )
+    t.start()
+
+    return {"status": "started", "session_id": session_id}
+
+
+# ─── Decision Reversal ─────────────────────────────────────────────
+@app.post("/api/decision/reverse")
+async def reverse_decision(payload: DecisionReversal):
+    """
+    Atomically reverse a swipe decision:
+    1. Delete the Annotation row in SQLite
+    2. Reset Firestore photo status to 'pending'
+    3. Clear Media.enhanced_path if it was an accepted photo
+    4. Remove embedding from ChromaDB (with existence guard — Gemini Extension #4)
+    """
+    db = SessionLocal()
+    try:
+        # ── Step 1: Find Media by photo_hash ─────────────────────────
+        media = db.query(Media).filter(Media.photo_hash == payload.photo_hash).first()
+        if not media:
+            raise HTTPException(status_code=404, detail=f"No media found with hash: {payload.photo_hash}")
+
+        # ── Step 2: Find and delete Annotation ───────────────────────
+        annotation = db.query(Annotation).filter(
+            Annotation.media_id == media.id,
+            Annotation.user_id == payload.user_id,
+        ).order_by(Annotation.timestamp.desc()).first()
+
+        if not annotation:
+            raise HTTPException(status_code=404, detail=f"No annotation found for hash={payload.photo_hash}, user={payload.user_id}")
+
+        previous_action = annotation.action
+        db.delete(annotation)
+
+        # ── Step 3: Clear enhanced_path if it was an acceptance ──────
+        if previous_action == "swipe_right_keeper":
+            media.enhanced_path = None
+
+        db.commit()
+
+        # ── Step 4: Reset Firestore status to 'pending' ─────────────
+        try:
+            from firebase_admin import firestore as fs_admin
+            fs_db = fs_admin.client()
+            # Find the Firestore doc by filename
+            filename = os.path.basename(media.file_path)
+            docs = fs_db.collection("photos").where("filename", "==", filename).get()
+            for doc in docs:
+                doc.reference.update({
+                    "status": "pending",
+                    "swipe_duration_ms": fs_admin.DELETE_FIELD,
+                })
+            print(f"[decision/reverse] ✅ Firestore reset to 'pending' for {filename}")
+        except Exception as fs_err:
+            # Firestore update failed — rollback SQLite
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Firestore update failed, SQLite rolled back: {fs_err}"
+            )
+
+        # ── Step 5: Remove ChromaDB embedding (Gemini Extension #4) ──
+        try:
+            from vector_store import ChromaManager
+            chroma = ChromaManager()
+            collection_name = (
+                "accepted_preferences" if previous_action == "swipe_right_keeper"
+                else "rejected_preferences"
+            )
+            # Gemini Refinement #4: existence check before deletion
+            try:
+                existing = chroma.get_embedding(collection_name, payload.photo_hash)
+                if existing:
+                    chroma.delete_embedding(collection_name, payload.photo_hash)
+                    print(f"[decision/reverse] 🧠 Removed embedding from {collection_name}")
+            except Exception:
+                pass  # Embedding may never have been generated — safe to skip
+        except Exception as chroma_err:
+            print(f"[decision/reverse] ⚠️ ChromaDB cleanup skipped: {chroma_err}")
+
+        return {
+            "status": "reversed",
+            "photo_hash": payload.photo_hash,
+            "previous_action": previous_action,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 

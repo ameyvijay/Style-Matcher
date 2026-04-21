@@ -202,7 +202,7 @@ class FirebaseBridge:
             
         def on_snapshot(col_snapshot, changes, read_time):
             for change in changes:
-                if change.type.name != 'MODIFIED':
+                if change.type.name not in ('ADDED', 'MODIFIED'):
                     continue
 
                 doc_data = change.document.to_dict()
