@@ -59,6 +59,19 @@ function getTier(rawTier) {
 const SWIPE_THRESHOLD = 110;
 const ZOOM_PRELOAD_DELAY_MS = 200; // Don't preload full-res until 200ms hold
 
+/**
+ * SKIP_THRESHOLD — vertical drag distance (px) required to trigger a "Skip / Review Later"
+ * gesture. Deliberately higher than the horizontal SWIPE_THRESHOLD so the user has to be
+ * intentional about it.
+ *
+ * TODO (Skip / Review Later):
+ *   - On upward skip: call onSwipe("skipped", ms) and POST /api/annotations/skip { photo_hash }
+ *   - Backend should move the photo to the end of the Firestore queue (re-enqueue) rather
+ *     than writing an Annotation row, preserving "undecided" status.
+ *   - Add a dedicated SkipQueue view in the Data Governance tab to surface skipped items.
+ */
+const SKIP_THRESHOLD = 140;
+
 // ── Sync Pulse Indicator ───────────────────────────────────────────────
 const SYNC_PULSE_CONFIG = {
   optimal:   { color: "#10b981", label: "Optimal",      Icon: Activity },
@@ -166,13 +179,25 @@ export default function SwipeCard({
 
   const stopProp = useCallback((e) => e.stopPropagation(), []);
 
-  // Physics-based drag
+  // Physics-based drag — horizontal axis (keep / cull)
   const x = useMotionValue(0);
   const springX = useSpring(x, { stiffness: 420, damping: 42 });
   const rotate = useTransform(x, [-260, 260], [-20, 20]);
   const cardOpacity = useTransform(x, [-260, -190, 0, 190, 260], [0, 1, 1, 1, 0]);
   const acceptOpacity = useTransform(x, [30, SWIPE_THRESHOLD], [0, 1]);
   const rejectOpacity = useTransform(x, [-30, -SWIPE_THRESHOLD], [0, 1]);
+
+  /**
+   * TODO (Skip / Review Later — vertical axis):
+   * y is intentionally wired but the skip action is NOT yet implemented.
+   * When the user drags upward past SKIP_THRESHOLD, show the SKIP overlay
+   * and call onSwipe("skipped", ms).  Downward drag is reserved for a future
+   * "Super Cull" (immediate delete) gesture — leave dragConstraints.bottom: 0
+   * until that feature is specced.
+   */
+  const y = useMotionValue(0);
+  // skipOpacity fades in as the card moves upward (negative y)
+  const skipOpacity = useTransform(y, [-30, -SKIP_THRESHOLD], [0, 1]);
 
   const tier = getTier(photo.tier);
   const imageUrl = cachedUrl || photo.rlhf_url || photo.url;
@@ -182,15 +207,31 @@ export default function SwipeCard({
   const handleDragEnd = useCallback(
     (_, info) => {
       const ms = Date.now() - cardPresentedAt.current;
+
+      // Horizontal: keep / cull (existing logic)
       if (info.offset.x > SWIPE_THRESHOLD) {
         onSwipeStart?.();
         onSwipe("accepted", ms);
       } else if (info.offset.x < -SWIPE_THRESHOLD) {
         onSwipeStart?.();
         onSwipe("rejected", ms);
+
+      // Vertical: skip / review later (stub — backend not wired)
+      } else if (info.offset.y < -SKIP_THRESHOLD) {
+        /**
+         * TODO (Skip / Review Later):
+         * 1. Call onSwipe("skipped", ms) once the backend endpoint is ready.
+         * 2. POST /api/annotations/skip { photo_hash: photo.photo_hash }
+         *    Backend should re-enqueue the photo at the tail of the Firestore queue
+         *    without writing a terminal Annotation row.
+         * 3. Update the HiLT Swipe queue count badge to reflect pending skips.
+         */
+        console.log("[SwipeCard] ⏭ Skip gesture detected — endpoint not yet wired.", { photo_hash: photo.photo_hash, ms });
+        // onSwipeStart?.();
+        // onSwipe("skipped", ms);
       }
     },
-    [onSwipe, onSwipeStart]
+    [onSwipe, onSwipeStart, photo.photo_hash]
   );
 
   // ── Zoom open ────────────────────────────────────────────────────────
@@ -318,16 +359,33 @@ export default function SwipeCard({
       <motion.div
         style={{
           x: isTop ? x : 0,
+          /**
+           * TODO (Skip gesture): swap `y: stackY` for `y: isTop ? y : stackY` once the
+           * skip feature is fully implemented so the card physically moves upward on drag.
+           * Keeping it at stackY for non-top cards ensures the stack perspective is correct.
+           */
+          y: stackY,
           rotate: isTop ? rotate : 0,
           opacity: isTop ? cardOpacity : 1,
           scale: stackScale,
-          y: stackY,
           touchAction: "none",
           ...styles.cardWrapper,
           zIndex: 10 - stackOffset,
         }}
-        drag={isTop ? "x" : false}
-        dragConstraints={{ left: 0, right: 0 }}
+        drag={isTop ? true : false}
+        dragConstraints={{
+          left: 0,
+          right: 0,
+          /**
+           * TODO (Skip / Review Later):
+           * top: 0 allows upward drag. Set to a positive number once the skip
+           * action is fully implemented to add intentional resistance:
+           *   top: -SKIP_THRESHOLD * 1.5
+           * bottom: 0 reserves downward drag for a future "Super Cull" gesture.
+           */
+          top: 0,
+          bottom: 0,
+        }}
         dragElastic={0.11}
         onDragEnd={handleDragEnd}
       >
@@ -356,6 +414,21 @@ export default function SwipeCard({
                 <span style={{ ...styles.overlayLabel, color: "#f87171" }}>CULL</span>
               </div>
             </motion.div>
+
+            {/**
+             * SKIP overlay — appears on upward vertical drag.
+             * TODO: activate once skip endpoint is wired; currently opacity stays 0
+             * because y MotionValue is not yet bound to the card's y style prop.
+             * To enable: change card's `y` style to `y: isTop ? y : stackY`.
+             */}
+            {isTop && (
+              <motion.div style={{ ...styles.overlay, ...styles.overlaySkip, opacity: skipOpacity }}>
+                <div style={styles.overlayBadge}>
+                  <ChevronUp size={38} strokeWidth={3} color="#60a5fa" />
+                  <span style={{ ...styles.overlayLabel, color: "#60a5fa" }}>SKIP</span>
+                </div>
+              </motion.div>
+            )}
 
             {/* Top HUD: tier, score, sync pulse */}
             <div style={styles.topHud}>
@@ -648,6 +721,8 @@ const styles = {
   overlay: { position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" },
   overlayAccept: { background: "rgba(16,185,129,0.32)" },
   overlayReject: { background: "rgba(248,113,113,0.32)" },
+  /** TODO: overlaySkip is ready for the vertical Skip gesture. Background intentionally blue-tinted. */
+  overlaySkip:   { background: "rgba(96,165,250,0.32)" },
   overlayBadge: { display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.55)", borderRadius: "20px", padding: "18px 28px", backdropFilter: "blur(12px)", border: "1.5px solid rgba(255,255,255,0.12)" },
   overlayLabel: { fontSize: "1rem", fontWeight: "800", letterSpacing: "0.22em" },
   // HUD

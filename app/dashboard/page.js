@@ -50,7 +50,7 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const MetricCard = ({ title, value, icon: Icon, colorClass }) => (
+  const MetricCard = ({ title, value, icon: Icon, colorClass, isPercentage = true }) => (
     <div className={styles.metricCard}>
       <div className={`${styles.metricBlur} ${colorClass}`}></div>
       <div className={styles.metricHeader}>
@@ -59,7 +59,9 @@ export default function DashboardPage() {
         </div>
       </div>
       <h3 className={styles.metricTitle}>{title}</h3>
-      <p className={styles.metricValue}>{typeof value === 'number' && value < 1 ? value.toFixed(2) : value}</p>
+      <p className={styles.metricValue}>
+        {isPercentage ? `${(value * 100).toFixed(1)}%` : value}
+      </p>
     </div>
   );
 
@@ -82,7 +84,7 @@ export default function DashboardPage() {
             <MetricCard title="System F1 Score" value={stats.f1} icon={Target} colorClass={styles.bgBlue} />
             <MetricCard title="Precision" value={stats.precision} icon={TrendingUp} colorClass={styles.bgGreen} />
             <MetricCard title="Recall" value={stats.recall} icon={BarChart3} colorClass={styles.bgPurple} />
-            <MetricCard title="Rescued Photos" value={stats.rescued} icon={ShieldAlert} colorClass={styles.bgRed} />
+            <MetricCard title="Rescued Photos" value={stats.rescued} icon={ShieldAlert} colorClass={styles.bgRed} isPercentage={false} />
           </div>
 
           <div className={styles.contentGrid}>

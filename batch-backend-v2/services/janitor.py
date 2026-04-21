@@ -167,3 +167,19 @@ class JanitorService:
             return ts < cutoff_epoch
 
         return False  # Unknown format — don't delete
+
+    def purge_local_annotations(self, db_session) -> int:
+        """
+        Feature 7/8: Purge local database annotations older than TTL.
+        """
+        from database import Annotation
+        from sqlalchemy import delete
+        
+        cutoff_dt = datetime.now() - timedelta(days=self.max_age_days)
+        print(f"🧹 [Janitor] Purging local annotations older than {cutoff_dt}")
+        
+        stmt = delete(Annotation).where(Annotation.timestamp < cutoff_dt)
+        result = db_session.execute(stmt)
+        db_session.commit()
+        
+        return result.rowcount

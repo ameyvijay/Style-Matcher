@@ -66,6 +66,16 @@ All batch processing logic is encapsulated in `pipeline/stages/`. When adding ne
 
 ---
 
+### Checkpoints
+- **2026-04-21**: Persistent Stack Orchestration (PM2) and Admin Console UI Refactor complete. 
+    - `ecosystem.config.js` implemented.
+    - `/health` endpoint added to `main.py`.
+    - `app/landing/page.js` refactored to Tabbed Admin Console.
+    - `components/SwipeCard.js` updated with Skip-gesture stubs.
+    - **Current Status**: All services online, stable, and GitHub synced.
+
+---
+
 ## 📁 Directory Structure
 - `/app`: Next.js App Router pages (Dashboard, Cull, Style Match).
 - `/batch-backend-v2`: FastAPI source code.

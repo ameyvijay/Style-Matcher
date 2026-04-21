@@ -238,13 +238,12 @@ export default function CullPage() {
             <div style={S.headerIcon}>
               <Sparkles size={17} color="white" />
             </div>
-            <span style={S.headerTitle}>HiLT Swipe</span>
+            <span style={S.headerTitle}>HiTL Swiper</span>
             {photos.length > 0 && <span style={S.headerBadge}>{photos.length}</span>}
           </div>
 
           <div style={S.headerRight}>
             <Link href="/qa" style={S.headerBtn} title="History"><History size={15} /></Link>
-            <Link href="/dashboard" style={S.headerBtn} title="Analytics"><BarChart2 size={15} /></Link>
             <button
               onClick={() => signOut(auth)}
               style={{ ...S.headerBtn, color: "#f87171", background: "rgba(248,113,113,0.07)" }}

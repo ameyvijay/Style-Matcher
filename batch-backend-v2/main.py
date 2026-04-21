@@ -14,7 +14,7 @@ import subprocess
 from contextlib import asynccontextmanager
 import asyncio
 
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -38,7 +38,66 @@ class DecisionReversal(BaseModel):
 
 import batch_orchestrator
 import firebase_bridge
-from database import SessionLocal, Media, Inference, Annotation, ModelRegistry, SyncQueue
+from database import SessionLocal, Media, Inference, Annotation, ModelRegistry, SyncQueue, get_db
+from services.mlops_metrics import DatasetMetricsService
+
+# ─── Admin & MLOps Endpoints ──────────────────────────────────────
+@app.get("/api/admin/dataset-stats")
+async def get_dataset_stats(db: SessionLocal = Depends(get_db)):
+    service = DatasetMetricsService(db)
+    return service.get_dataset_stats()
+
+@app.get("/api/admin/telemetry")
+async def get_system_telemetry(db: SessionLocal = Depends(get_db)):
+    service = DatasetMetricsService(db)
+    return service.get_system_telemetry()
+
+@app.post("/api/annotations/ttl-cleanup")
+async def cleanup_stale_annotations(db: SessionLocal = Depends(get_db)):
+    """Feature 7: Purge annotations older than TTL window (default 10 days)."""
+    from services.janitor import JanitorService
+    janitor = JanitorService(max_age_days=10)
+    count = janitor.purge_local_annotations(db)
+    return {"status": "cleanup_complete", "deleted_count": count}
+
+@app.post("/api/annotations/reverse")
+async def reverse_annotation(payload: DecisionReversal, db: SessionLocal = Depends(get_db)):
+    """Feature 8: Full reversal of annotation."""
+    media = db.query(Media).filter(Media.photo_hash == payload.photo_hash).first()
+    if not media:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    
+    annotation = db.query(Annotation).filter(Annotation.media_id == media.id).first()
+    if not annotation:
+        raise HTTPException(status_code=404, detail="No annotation to reverse")
+    
+    # Toggle logic
+    old_action = annotation.action
+    new_action = "swipe_right_keeper" if old_action == "swipe_left_cull" else "swipe_left_cull"
+    annotation.action = new_action
+    annotation.timestamp = datetime.now()
+    db.commit()
+    
+    return {"status": "reversed", "from": old_action, "to": new_action}
+
+@app.post("/api/annotations/skip")
+async def skip_annotation(payload: DecisionReversal, db: SessionLocal = Depends(get_db)):
+    """Feature 9: Mark a photo as skipped for later review."""
+    media = db.query(Media).filter(Media.photo_hash == payload.photo_hash).first()
+    if not media:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    
+    # We record a 'skip' action. This prevents it from appearing in current culling 
+    # but keeps it in the system for a 'Review Skips' pass later.
+    new_ann = Annotation(
+        media_id=media.id,
+        user_id=payload.user_id,
+        action="skipped",
+        timestamp=datetime.now()
+    )
+    db.add(new_ann)
+    db.commit()
+    return {"status": "skipped"}
 
 # ─── Memory & VRAM Management ──────────────────────────────────────
 async def ensure_memory_headroom(threshold_pct: float = 80.0):
@@ -399,12 +458,13 @@ async def get_analytics():
             # Overwrite with latest annotation per media_id
             human_truth[ann.media_id] = ann.action 
 
-        inferences = db.query(Inference).all()
+        inferences = db.query(Inference).order_by(Inference.id.asc()).all()
         model_predictions = {}
         for inf in inferences:
             try:
                 data = json.loads(inf.inference_value)
                 is_keeper = data.get("tier") in ["portfolio", "keeper"]
+                # Overwrite with latest inference per media_id
                 model_predictions[inf.media_id] = "swipe_right_keeper" if is_keeper else "swipe_left_cull"
             except:
                 pass
