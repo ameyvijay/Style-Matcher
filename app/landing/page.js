@@ -178,7 +178,94 @@ function DataGovernanceTab() {
 
 // ── Model Ops Tab ─────────────────────────────────────────────────────────────
 function ModelOpsTab() {
-  const { Zap, RefreshCw, FlaskConical, ChevronRight } = require("lucide-react");
+  const { Zap, RefreshCw, FlaskConical, ChevronRight, Play, CheckCircle, Clock, Save, Plus, Sparkles, AlertCircle, Info, Trash2, AlertTriangle } = require("lucide-react");
+  const [prompts, setPrompts] = useState([]);
+  const [activePrompt, setActivePrompt] = useState(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResults, setTestResults] = useState(null);
+  const [newPrompt, setNewPrompt] = useState({ version: "", system: "", user: "", notes: "" });
+  const [isCreating, setIsCreating] = useState(false);
+  const [recommendations, setRecommendations] = useState([]);
+
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    fetchPrompts();
+    fetchRecommendations();
+  }, []);
+
+  const fetchPrompts = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/prompts`);
+      const data = await res.json();
+      setPrompts(data);
+      const active = data.find(p => p.is_production);
+      if (active) setActivePrompt(active);
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchRecommendations = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/admin/recommendations`);
+      const data = await res.json();
+      setRecommendations(data);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleTest = async (version) => {
+    setIsTesting(true);
+    setTestResults(null);
+    try {
+      const res = await fetch(`${baseUrl}/api/model/test-prompt?version=${version}`, { method: "POST" });
+      const data = await res.json();
+      if (data.error) alert(data.error);
+      else {
+        setTestResults(data);
+        fetchPrompts(); // Refresh metrics
+      }
+    } catch (e) { alert("Test Failed"); }
+    finally { setIsTesting(false); }
+  };
+
+  const handlePromote = async (version) => {
+    if (!confirm(`Promote ${version} to Production? This will retire the current prompt.`)) return;
+    try {
+      await fetch(`${baseUrl}/api/prompts/${version}/promote`, { method: "POST" });
+      fetchPrompts();
+    } catch (e) { alert("Promotion Failed"); }
+  };
+
+  const handleCreate = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/prompts/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          version: newPrompt.version,
+          system_prompt: newPrompt.system,
+          user_prompt: newPrompt.user,
+          notes: newPrompt.notes
+        })
+      });
+      if (res.ok) {
+        setIsCreating(false);
+        setNewPrompt({ version: "", system: "", user: "", notes: "" });
+        fetchPrompts();
+      }
+    } catch (e) { alert("Creation Failed"); }
+  };
+
+  const handleOp = async (op) => {
+    if (op.onTrigger) {
+      await op.onTrigger();
+      return;
+    }
+    // Generic POST handler
+    try {
+      const res = await fetch(`${baseUrl}${op.endpoint.replace("POST ", "")}`, { method: "POST" });
+      if (res.ok) alert(`${op.title} Started Successfully`);
+    } catch (e) { alert(`${op.title} Failed`); }
+  };
 
   const ops = [
     {
@@ -187,7 +274,6 @@ function ModelOpsTab() {
       status: "Idle",
       color: "#10b981",
       body: "Trigger incremental LoRA weight updates from the latest accepted/rejected annotation batch.",
-      /** TODO: Wire to POST /api/model/lora-update */
       endpoint: "POST /api/model/lora-update",
     },
     {
@@ -196,8 +282,23 @@ function ModelOpsTab() {
       status: "Idle",
       color: "#a78bfa",
       body: "Re-index all accepted exemplars into ChromaDB and refresh the semantic search vectors.",
-      /** TODO: Wire to POST /api/model/rag-rebuild */
-      endpoint: "POST /api/model/rag-rebuild",
+      endpoint: "POST /api/admin/promote-golden-set",
+      onTrigger: async () => {
+        try {
+          const res = await fetch(`${baseUrl}/api/admin/promotable-snapshots`);
+          const snaps = await res.json();
+          if (snaps.length === 0) {
+            alert("No Golden Set snapshots found. Create one first in Data Governance.");
+            return;
+          }
+          const version = prompt("Enter Snapshot Version to promote:\n\nAvailable:\n" + snaps.map(s => s.version).join("\n"));
+          if (!version) return;
+          
+          const promoteRes = await fetch(`${baseUrl}/api/admin/promote-golden-set?snapshot_version=${version}`, { method: "POST" });
+          const data = await promoteRes.json();
+          alert(`Promoted ${data.promoted} vectors to RAG collection.`);
+        } catch (e) { alert("RAG Rebuild Failed"); }
+      }
     },
     {
       Icon: FlaskConical,
@@ -205,10 +306,40 @@ function ModelOpsTab() {
       status: "Not Run",
       color: "#f59e0b",
       body: "Run the held-out eval split through the current model and report accuracy + confusion matrix.",
-      /** TODO: Wire to POST /api/model/staging-eval */
-      endpoint: "POST /api/model/staging-eval",
+      endpoint: "POST /api/model/compare",
+      onTrigger: async () => {
+        const tag = prompt("Enter Candidate Model Tag (Ollama):\ne.g., moondream:v2, llava:7b");
+        if (!tag) return;
+        const res = await fetch(`${baseUrl}/api/admin/promotable-snapshots`);
+        const snaps = await res.json();
+        const version = prompt("Enter Snapshot Version for Evaluation:\n" + snaps.map(s => s.version).join("\n"));
+        if (!version) return;
+        
+        setIsTesting(true);
+        try {
+          const evalRes = await fetch(`${baseUrl}/api/model/compare?candidate_tag=${tag}&snapshot_version=${version}`, { method: "POST" });
+          const data = await evalRes.json();
+          setTestResults({
+            version: `${tag} (Candidate)`,
+            accuracy: data.candidate.accuracy,
+            avg_latency: data.candidate.resources.p50_latency_ms,
+            total_tested: data.candidate.resources.images_evaluated,
+            verdict: data.verdict
+          });
+        } catch (e) { alert("Evaluation Failed"); }
+        finally { setIsTesting(false); }
+      }
     },
   ];
+
+  const handleFlush = async () => {
+    if (!confirm("⚠️ DANGER: This will surgically wipe all TEST inferences and skipped annotations. Proceed?")) return;
+    try {
+      const res = await fetch(`${baseUrl}/api/admin/flush-test-data`, { method: "POST" });
+      const data = await res.json();
+      alert(`Flush Complete: ${data.details.inferences_flushed} inferences, ${data.details.skips_cleared} skips cleared.`);
+    } catch (e) { alert("Flush Failed"); }
+  };
 
   return (
     <div style={styles.shellPanel}>
@@ -219,7 +350,43 @@ function ModelOpsTab() {
         </p>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      {/* ── AI Recommendation Engine ── */}
+      {recommendations.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "2rem" }}>
+          {recommendations.map((rec) => {
+            const isHigh = rec.priority === "HIGH";
+            const themeColor = isHigh ? "#f59e0b" : "#60a5fa";
+            return (
+              <div key={rec.id} style={{ ...styles.recBanner, borderColor: `${themeColor}40`, background: `${themeColor}08` }}>
+                <div style={{ ...styles.opIconWrap, width: "32px", height: "32px", background: `${themeColor}20` }}>
+                  {isHigh ? <Sparkles size={16} color={themeColor} /> : <Info size={16} color={themeColor} />}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: "800", color: "#fff" }}>{rec.title}</span>
+                    <span style={{ ...styles.shellBadge, fontSize: "0.5rem", padding: "1px 5px", background: themeColor, color: "#000", border: "none" }}>
+                      {rec.priority}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.5)", margin: "2px 0 0" }}>{rec.body}</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    if (rec.id === "rag_rebuild") handleOp(ops[1]);
+                    else if (rec.id === "prompt_opt") setActiveTab("model-ops");
+                    else if (rec.id === "more_data") window.location.href = "/cull";
+                  }}
+                  style={{ ...styles.actionBtn, opacity: 1, cursor: "pointer", borderColor: themeColor, color: themeColor, fontSize: "0.65rem", padding: "0.4rem 0.8rem" }}
+                >
+                  {rec.action}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginBottom: "3rem" }}>
         {ops.map((op) => (
           <div key={op.title} style={{ ...styles.opRow, borderColor: `${op.color}22` }}>
             <div style={{ ...styles.opIconWrap, background: `${op.color}18`, border: `1px solid ${op.color}40` }}>
@@ -231,16 +398,142 @@ function ModelOpsTab() {
                 <span style={{ ...styles.shellBadge, borderColor: `${op.color}55`, color: op.color }}>{op.status}</span>
               </div>
               <p style={{ fontSize: "0.76rem", color: "rgba(255,255,255,0.42)", margin: 0, lineHeight: "1.5" }}>{op.body}</p>
-              <code style={{ fontSize: "0.6rem", color: "rgba(255,255,255,0.2)", fontFamily: "'Courier New', monospace", marginTop: "6px", display: "block" }}>
-                {/* TODO: endpoint={op.endpoint} */}
-                Endpoint: {op.endpoint}
-              </code>
             </div>
-            <button style={{ ...styles.opTriggerBtn, borderColor: `${op.color}44`, color: op.color }} disabled>
+            <button 
+              onClick={() => handleOp(op)}
+              style={{ ...styles.opTriggerBtn, borderColor: `${op.color}44`, color: op.color, opacity: 1, cursor: "pointer" }}
+            >
               <ChevronRight size={16} />
             </button>
           </div>
         ))}
+      </div>
+
+      {/* ── Prompt Playground ── */}
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "2rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+          <div>
+            <h3 style={{ ...styles.shellTitle, fontSize: "1.1rem", marginBottom: "0.25rem" }}>Prompt Playground</h3>
+            <p style={styles.shellDescription}>Version and test VLM instructions against the Golden Set.</p>
+          </div>
+          <button 
+            onClick={() => setIsCreating(!isCreating)}
+            style={{ ...styles.actionBtn, background: "var(--accent-base)", color: "#000", border: "none", padding: "0.5rem 1rem" }}
+          >
+            <Plus size={14} /> New Prompt
+          </button>
+        </div>
+
+        {isCreating && (
+          <div style={{ ...styles.opRow, flexDirection: "column", alignItems: "stretch", gap: "1rem", marginBottom: "2rem", background: "rgba(255,255,255,0.02)" }}>
+            <input 
+              placeholder="Version (e.g., v1.1-beta)" 
+              value={newPrompt.version}
+              onChange={e => setNewPrompt({...newPrompt, version: e.target.value})}
+              style={styles.playgroundInput}
+            />
+            <textarea 
+              placeholder="System Prompt (Persona & Rules)" 
+              value={newPrompt.system}
+              onChange={e => setNewPrompt({...newPrompt, system: e.target.value})}
+              style={{ ...styles.playgroundInput, minHeight: "80px" }}
+            />
+            <textarea 
+              placeholder="User Prompt Template ({placeholders})" 
+              value={newPrompt.user}
+              onChange={e => setNewPrompt({...newPrompt, user: e.target.value})}
+              style={{ ...styles.playgroundInput, minHeight: "120px" }}
+            />
+            <div style={{ display: "flex", gap: "1rem", justifyContent: "flex-end" }}>
+              <button onClick={() => setIsCreating(false)} style={styles.actionBtn}>Cancel</button>
+              <button onClick={handleCreate} style={{ ...styles.actionBtn, borderColor: "var(--accent-base)", color: "var(--accent-base)" }}>
+                <Save size={14} /> Save Draft
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isTesting && (
+          <div style={{ padding: "2rem", textAlign: "center", background: "rgba(96,165,250,0.05)", borderRadius: "12px", border: "1px dashed #60a5fa", marginBottom: "1.5rem" }}>
+            <RefreshCw className="animate-spin" size={24} color="#60a5fa" style={{ marginBottom: "1rem" }} />
+            <div style={{ color: "#60a5fa", fontWeight: "600" }}>Running Golden Set Evaluation...</div>
+            <div style={{ fontSize: "0.75rem", color: "rgba(96,165,250,0.6)", marginTop: "0.5rem" }}>M4 Memory Guard Active · Serializing Inferences</div>
+          </div>
+        )}
+
+        {testResults && (
+          <div style={{ padding: "1.5rem", background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: "12px", marginBottom: "1.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+              <CheckCircle size={20} color="#10b981" />
+              <span style={{ fontWeight: "700", color: "#fff" }}>Test Complete: {testResults.version}</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1rem" }}>
+              <div style={styles.miniMetric}>
+                <span style={styles.miniLabel}>Accuracy</span>
+                <span style={styles.miniValue}>{(testResults.accuracy * 100).toFixed(1)}%</span>
+              </div>
+              <div style={styles.miniMetric}>
+                <span style={styles.miniLabel}>Avg Latency</span>
+                <span style={styles.miniValue}>{Math.round(testResults.avg_latency)}ms</span>
+              </div>
+              <div style={styles.miniMetric}>
+                <span style={styles.miniLabel}>Samples</span>
+                <span style={styles.miniValue}>{testResults.total_tested}</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {prompts.map((p) => (
+            <div key={p.version} style={{ ...styles.promptCard, borderLeft: p.is_production ? "4px solid #10b981" : "4px solid rgba(255,255,255,0.1)" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                  <span style={{ fontWeight: "800", color: "#fff" }}>{p.version}</span>
+                  <span style={{ ...styles.shellBadge, borderColor: p.is_production ? "#10b981" : "rgba(255,255,255,0.2)", color: p.is_production ? "#10b981" : "rgba(255,255,255,0.4)" }}>
+                    {p.status}
+                  </span>
+                  {p.golden_success_rate && (
+                    <span style={{ fontSize: "0.7rem", color: "#60a5fa", fontWeight: "600" }}>
+                      GS: {(p.golden_success_rate * 100).toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.3)", margin: 0, fontStyle: "italic" }}>
+                  Created {new Date(p.created_at).toLocaleDateString()} · {p.total_inferences} inferences
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button onClick={() => handleTest(p.version)} style={styles.iconBtn} title="Run Golden Test">
+                  <Play size={14} />
+                </button>
+                {!p.is_production && (
+                  <button onClick={() => handlePromote(p.version)} style={styles.iconBtn} title="Promote to Production">
+                    <CheckCircle size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Dangerous Ops ── */}
+        <div style={{ marginTop: "3rem", padding: "1.5rem", background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.15)", borderRadius: "14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+            <AlertTriangle size={18} color="#f87171" />
+            <span style={{ fontSize: "0.9rem", fontWeight: "700", color: "#f87171", textTransform: "uppercase", letterSpacing: "0.05em" }}>Dangerous Ops</span>
+          </div>
+          <p style={{ fontSize: "0.75rem", color: "rgba(248,113,113,0.6)", marginBottom: "1.5rem" }}>
+            Surgically reset the system by clearing experimental test data. This action is irreversible.
+          </p>
+          <button 
+            onClick={handleFlush}
+            style={{ ...styles.actionBtn, opacity: 1, cursor: "pointer", borderColor: "rgba(248,113,113,0.4)", color: "#f87171", background: "rgba(248,113,113,0.06)" }}
+          >
+            <Trash2 size={14} />
+            Flush Test Inferences & Skips
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -768,5 +1061,68 @@ const styles = {
     fontWeight: "800",
     color: "#fff",
     fontFamily: "'Courier New', monospace",
+  },
+  // Prompt Playground
+  promptCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: "1rem",
+    padding: "1rem 1.25rem",
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: "12px",
+    transition: "transform 0.2s ease",
+  },
+  playgroundInput: {
+    background: "rgba(0,0,0,0.2)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: "8px",
+    padding: "0.75rem",
+    color: "#fff",
+    fontSize: "0.85rem",
+    fontFamily: "'Courier New', monospace",
+    outline: "none",
+    width: "100%",
+  },
+  miniMetric: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    background: "rgba(0,0,0,0.2)",
+    padding: "0.6rem",
+    borderRadius: "8px",
+    textAlign: "center",
+  },
+  miniLabel: {
+    fontSize: "0.55rem",
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.3)",
+    fontWeight: "700",
+  },
+  miniValue: {
+    fontSize: "0.9rem",
+    fontWeight: "800",
+    color: "#fff",
+  },
+  iconBtn: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "8px",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    color: "rgba(255,255,255,0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    transition: "all 0.2s",
+  },
+  recBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: "1rem",
+    padding: "0.85rem 1.25rem",
+    borderRadius: "14px",
+    border: "1px solid",
   },
 };

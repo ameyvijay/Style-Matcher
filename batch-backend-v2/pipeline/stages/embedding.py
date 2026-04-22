@@ -108,13 +108,8 @@ class EmbeddingStage(ProcessingStage):
                 inf = Inference(
                     media_id=media.id,
                     model_id=ctx.model_record.id,
-                    inference_value=json.dumps({
-                        "tier": max_tier.value,
-                        "sharp": quality.sharpness,
-                        "aes": quality.aesthetic,
-                        "prompt_version": _prompt_version,
-                        "semantic_description": _semantic_desc,
-                    }),
+                    prompt_version=_prompt_version,
+                    inference_value=json.dumps(quality.to_dict()),
                     embedding_blob=embedding_json,
                     confidence=1.0,
                     processing_time_ms=(time.time() - res["start"]) * 1000,

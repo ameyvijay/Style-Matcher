@@ -183,3 +183,38 @@ class JanitorService:
         db_session.commit()
         
         return result.rowcount
+
+    def flush_test_data(self, db_session, session_id: str = None) -> dict:
+        """
+        Surgically delete test inferences and annotations.
+        If session_id is provided, only flushes that session.
+        """
+        from database import Inference, Annotation
+        import json
+        from sqlalchemy import delete
+
+        # 1. Delete Inferences marked as test
+        # Note: We filter by parsing the JSON in SQLite
+        inferences = db_session.query(Inference).all()
+        inf_deleted = 0
+        for inf in inferences:
+            try:
+                val = json.loads(inf.inference_value)
+                if val.get("is_test") is True:
+                    if session_id and val.get("eval_session") != session_id:
+                        continue
+                    db_session.delete(inf)
+                    inf_deleted += 1
+            except:
+                continue
+        
+        # 2. Delete annotations marked as 'skipped' or from test sessions
+        # (Annotations don't have is_test yet, we usually trigger them manually)
+        ann_stmt = delete(Annotation).where(Annotation.action == 'skipped')
+        ann_res = db_session.execute(ann_stmt)
+        
+        db_session.commit()
+        return {
+            "inferences_flushed": inf_deleted,
+            "skips_cleared": ann_res.rowcount
+        }

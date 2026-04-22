@@ -46,6 +46,17 @@ class AssessmentStage(ProcessingStage):
         return "Assessment"
 
     def execute(self, ctx: PipelineContext) -> Generator[str, None, None]:
+        # ─── MoE Pre-flight: Fetch Production Prompt Trust ───────────
+        from database import SessionLocal, PromptVersion
+        golden_success_rate = None
+        try:
+            with SessionLocal() as db:
+                prod_prompt = db.query(PromptVersion).filter(PromptVersion.is_production == True).first()
+                if prod_prompt:
+                    golden_success_rate = prod_prompt.golden_success_rate
+        except Exception as e:
+            print(f"⚠️ [AssessmentStage] Failed to fetch production prompt trust: {e}")
+
         # Accumulator for all groups' assessment data.
         # Each entry: (stem, group_results, max_tier, raw_master)
         ctx._assessed_groups = []
@@ -102,6 +113,7 @@ class AssessmentStage(ProcessingStage):
                         analyst=None,
                         exif=exif,
                         rag_similarity_score=rag_similarity,
+                        golden_success_rate=golden_success_rate,
                     )
 
                     group_results.append({

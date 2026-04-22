@@ -260,17 +260,25 @@ class FirebaseBridge:
                             # Lazy-init ChromaManager (thread-safe: PersistentClient is safe for concurrent access)
                             if self._chroma is None:
                                 self._chroma = ChromaManager()
+                            # Use composite ID to prevent overwrite on re-processing
+                            prompt_v = inference_row.prompt_version or "v1.0"
+                            doc_id = f"{media_record.photo_hash}__{prompt_v}"
+                            
                             self._chroma.add_embedding(
                                 collection_name=collection_name,
-                                photo_hash=media_record.photo_hash,
+                                doc_id=doc_id,
                                 embedding=embedding_vector,
                                 metadata={
                                     "filename": doc_data.get("filename", ""),
                                     "action": mapped_action,
+                                    "photo_hash": media_record.photo_hash,
+                                    "prompt_version": prompt_v,
+                                    "source": "rlhf_swipe",
+                                    "indexed_at": datetime.now().isoformat()
                                 },
                             )
                             embedding_id = inference_row.id
-                            print(f"[firebase_bridge] 🧠 Embedding → {collection_name} for {media_record.photo_hash}")
+                            print(f"[firebase_bridge] 🧠 Embedding → {collection_name} for {doc_id}")
                         except (json.JSONDecodeError, KeyError) as vec_err:
                             print(f"[firebase_bridge] ⚠️  Embedding deserialization failed: {vec_err}")
 

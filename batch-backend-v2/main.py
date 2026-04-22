@@ -13,6 +13,12 @@ import psutil
 import subprocess
 from contextlib import asynccontextmanager
 import asyncio
+from datetime import datetime
+
+from services.prompt_service import PromptService
+from services.rag_automation import RAGAutomationService
+from services.model_evaluator import ModelEvaluatorService
+from config import SYSTEM_TOTAL_RAM_GB, HEADROOM_GB, MEMORY_GATE_THRESHOLD_PCT
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,10 +42,28 @@ class DecisionReversal(BaseModel):
     photo_hash: str
     user_id: str = "guest"
 
+class PromptCreate(BaseModel):
+    version: str
+    system_prompt: str
+    user_prompt: str
+    author: str = "system"
+    notes: Optional[str] = None
+    parent_version: Optional[str] = None
+
+class BootstrapRequest(BaseModel):
+    limit: int = 50
+
 import batch_orchestrator
 import firebase_bridge
 from database import SessionLocal, Media, Inference, Annotation, ModelRegistry, SyncQueue, get_db
 from services.mlops_metrics import DatasetMetricsService
+from services.recommendation_engine import RecommendationEngine
+
+app = FastAPI(
+    title="Antigravity Engine",
+    version="2.1.0",
+    description="AI Photography Culling & Enhancement Engine",
+)
 
 # ─── Admin & MLOps Endpoints ──────────────────────────────────────
 @app.get("/api/admin/dataset-stats")
@@ -51,6 +75,21 @@ async def get_dataset_stats(db: SessionLocal = Depends(get_db)):
 async def get_system_telemetry(db: SessionLocal = Depends(get_db)):
     service = DatasetMetricsService(db)
     return service.get_system_telemetry()
+
+@app.get("/api/admin/recommendations")
+async def get_recommendations(db: SessionLocal = Depends(get_db)):
+    service = RecommendationEngine(db)
+    return service.get_recommendations()
+
+@app.get("/api/admin/promotable-snapshots")
+async def get_promotable_snapshots(db: SessionLocal = Depends(get_db)):
+    service = RAGAutomationService(db)
+    return service.get_promotable_snapshots()
+
+@app.post("/api/admin/promote-golden-set")
+async def promote_golden_set(snapshot_version: str, db: SessionLocal = Depends(get_db)):
+    service = RAGAutomationService(db)
+    return service.promote_golden_set_to_rag(snapshot_version)
 
 @app.post("/api/annotations/ttl-cleanup")
 async def cleanup_stale_annotations(db: SessionLocal = Depends(get_db)):
@@ -99,26 +138,99 @@ async def skip_annotation(payload: DecisionReversal, db: SessionLocal = Depends(
     db.commit()
     return {"status": "skipped"}
 
+@app.post("/api/admin/flush-test-data")
+async def flush_test_data(session_id: Optional[str] = None, db: SessionLocal = Depends(get_db)):
+    """Surgically wipe test inferences and skipped annotations to reset for testing."""
+    from services.janitor import JanitorService
+    janitor = JanitorService()
+    results = janitor.flush_test_data(db, session_id=session_id)
+    return {"status": "flush_complete", "details": results}
+
+@app.post("/api/model/compare")
+async def compare_models(candidate_tag: str, snapshot_version: str, db: SessionLocal = Depends(get_db)):
+    """Run a comparative evaluation between production and candidate models."""
+    service = ModelEvaluatorService(db)
+    results = await service.run_comparative_eval(candidate_tag, snapshot_version)
+    if "error" in results:
+        raise HTTPException(status_code=400, detail=results["error"])
+    return results
+
+# ─── Prompt Playground Endpoints ──────────────────────────────────
+@app.get("/api/prompts")
+async def list_prompts(db: SessionLocal = Depends(get_db)):
+    from database import PromptVersion
+    return db.query(PromptVersion).order_by(PromptVersion.created_at.desc()).all()
+
+@app.get("/api/prompts/active")
+async def get_active_prompt(db: SessionLocal = Depends(get_db)):
+    service = PromptService(db)
+    active = service.get_active_prompt()
+    if not active:
+        raise HTTPException(status_code=404, detail="No active prompt found")
+    return active
+
+@app.post("/api/prompts/create")
+async def create_prompt(payload: PromptCreate, db: SessionLocal = Depends(get_db)):
+    service = PromptService(db)
+    return service.create_prompt_version(
+        version=payload.version,
+        system_prompt=payload.system_prompt,
+        user_prompt=payload.user_prompt,
+        author=payload.author,
+        parent_version=payload.parent_version,
+        notes=payload.notes
+    )
+
+@app.post("/api/prompts/{version}/promote")
+async def promote_prompt(version: str, db: SessionLocal = Depends(get_db)):
+    service = PromptService(db)
+    service.promote_to_production(version)
+    return {"status": "promoted", "version": version}
+
+@app.post("/api/model/test-prompt")
+async def test_prompt(version: str, db: SessionLocal = Depends(get_db)):
+    """Run a candidate prompt against the Golden Set."""
+    service = PromptService(db)
+    results = await service.run_golden_set_test(version)
+    if "error" in results:
+        raise HTTPException(status_code=400, detail=results["error"])
+    return results
+
+@app.post("/api/admin/bootstrap-golden-set")
+async def bootstrap_golden_set(payload: BootstrapRequest, db: SessionLocal = Depends(get_db)):
+    service = PromptService(db)
+    snapshot = service.bootstrap_golden_set(payload.limit)
+    if not snapshot:
+        raise HTTPException(status_code=400, detail="No annotations found to bootstrap from")
+    return {"status": "golden_set_created", "version": snapshot.snapshot_version}
+
 # ─── Memory & VRAM Management ──────────────────────────────────────
-async def ensure_memory_headroom(threshold_pct: float = 80.0):
+async def ensure_memory_headroom(threshold_pct: float = None):
     """
     Adaptive Memory Guard: Check Unified Memory on M4.
     If RAM usage is too high, proactively unload Ollama models.
+    Uses threshold from config.py if not provided.
     """
+    target_threshold = threshold_pct or MEMORY_GATE_THRESHOLD_PCT
     mem = psutil.virtual_memory()
-    print(f"🧠 [Memory Guard] System RAM Usage: {mem.percent}%")
+    print(f"🧠 [Memory Guard] System RAM Usage: {mem.percent}% (Limit: {target_threshold}%)")
     
-    if mem.percent > threshold_pct:
+    if mem.percent > target_threshold:
         print(f"⚠️ [Memory Guard] Memory pressure high ({mem.percent}%). Evicting Ollama VLMs...")
         ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
         try:
             async with httpx.AsyncClient() as client:
-                res = await client.get(f"{ollama_url}/api/tags", timeout=2.0)
-                if res.status_code == 200:
-                    models = res.json().get("models", [])
+                # 1. Get all loaded models
+                tags_res = await client.get(f"{ollama_url}/api/tags", timeout=2.0)
+                if tags_res.status_code == 200:
+                    models = tags_res.json().get("models", [])
                     for m in models:
+                        # 2. Selective/Total Eviction: keep_alive: 0 unloads the model
                         await client.post(f"{ollama_url}/api/generate", json={"model": m["name"], "keep_alive": 0}, timeout=2.0)
                         print(f"✅ [Memory Guard] Unloaded model: {m['name']}")
+                
+                # 3. Kernel Page Reclaim Pause (Mandated by Architect)
+                await asyncio.sleep(3.0)
         except Exception as e:
             print(f"⚠️ [Memory Guard] Eviction failed: {e}")
     else:
@@ -169,12 +281,8 @@ async def lifespan(app: FastAPI):
         print(f"⚠️  [main] Listener stop error (non-fatal): {e}")
 
 
-app = FastAPI(
-    title="Antigravity Engine",
-    version="2.0.0",
-    description="AI Photography Culling & Enhancement Engine",
-    lifespan=lifespan,
-)
+# Lifespan handled via app.set_lifespan (modern FastAPI) or just defined here
+app.router.lifespan_context = lifespan
 
 # ─── CORS Middleware ────────────────────────────────────────────────
 # Allow Next.js PWA (running on Vercel or locally) to hit the Ngrok tunnel
@@ -309,20 +417,23 @@ async def execute_stage9_realization(accepted_file_paths: List[str]):
 
 
 @app.post("/api/session/close")
-async def close_session(payload: SessionClosePayload, background_tasks: BackgroundTasks):
+async def close_session(payload: SessionClosePayload, background_tasks: BackgroundTasks, db: SessionLocal = Depends(get_db)):
     """
     Mandate 1: Resource Segregation (M4 Unified Memory).
     Unloads the VLM from VRAM, verifies clearance, and hands off to Stage 9 MPS render.
     """
     print("🛑 [Memory Gatekeeper] User session complete. Commencing VLM Eviction from Unified Memory...")
     
-    # Step A: VLM Unload via Ollama API
+    # Step A: Dynamic VLM Unload via Ollama API
     try:
+        # Find the active production model to evict
+        prod = db.query(ModelRegistry).filter(ModelRegistry.is_production == True, ModelRegistry.model_type == 'vlm').first()
+        model_name = prod.ollama_tag if prod and prod.ollama_tag else "moondream"
+        
         async with httpx.AsyncClient() as client:
-            # Unload the vision model used in Stage 3.4 by passing keep_alive = 0
-            api_payload = {"model": "moondream", "keep_alive": 0} 
+            api_payload = {"model": model_name, "keep_alive": 0} 
             await client.post("http://127.0.0.1:11434/api/generate", json=api_payload, timeout=3.0)
-            print("✅ [Memory Gatekeeper] Ollama Eviction Signal Sent. Model unloaded.")
+            print(f"✅ [Memory Gatekeeper] Ollama Eviction Signal Sent for {model_name}. Model unloaded.")
     except Exception as e:
         print(f"⚠️ [Memory Gatekeeper] Ollama eviction notice: {str(e)}")
 

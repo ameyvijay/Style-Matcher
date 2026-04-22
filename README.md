@@ -13,6 +13,7 @@ Antigravity is a privacy-first, professional-grade suite for photographers. It s
 - **Aesthetic AI Coaching**: Real-time scoring using **NIMA (Neural Image Assessment)** to mathematically assess composition and color harmony.
 - **Non-Destructive Metadata Labeling**: Generates industry-standard **XMP sidecars** and **macOS Finder Color Tags** without altering a single pixel of your original masters.
 - **Privacy-First (Local LLM)**: Full integration with **Ollama** for offline AI analysis.
+- **Adaptive Intelligence Layer**: A hardware-aware Mixture of Experts (MoE) system with statistically rigorous evaluation. [Read the Technical Manifesto](docs/INTELLIGENCE_LAYER.md).
 
 ---
 

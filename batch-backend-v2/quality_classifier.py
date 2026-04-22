@@ -102,20 +102,10 @@ def classify_with_analyst(
     analyst: Optional[VisionAnalyst] = None,
     exif: dict = None,
     rag_similarity_score: Optional[float] = None,
+    golden_success_rate: Optional[float] = None,
 ) -> QualityScore:
     """
-    Full classification loop including semantic analysis.
-
-    Args:
-        image_input:          File path (str) or JPEG bytes.
-        analyst:              Optional VisionAnalyst for Ollama-based description
-                              and text-similarity scoring.
-        exif:                 Optional EXIF dict for genre-aware weighting.
-        rag_similarity_score: Optional pre-computed similarity score (0-100)
-                              from the SemanticRAG / ChromaDB retrieval step.
-                              When supplied this replaces the default 50.0
-                              neutral value for the 70/30 composite calculation,
-                              allowing RLHF signals to actively influence scoring.
+    Full classification loop including dynamic MoE weighting.
     """
     start = time.time()
 
@@ -129,74 +119,69 @@ def classify_with_analyst(
     if img is None:
         return QualityScore(tier=Tier.CULL, processing_time=time.time() - start)
 
-    # Normalize to classification working resolution (1600px max).
-    # RAW previews are already ~1620px from exiftool. Full-res JPEGs
-    # (6000x4000) must be downsized to match for consistent scoring
-    # and to prevent CPU-bound ML models from hanging (30-60s per image).
     h, w = img.shape[:2]
     if max(h, w) > _CLASSIFY_MAX_DIM:
         scale = _CLASSIFY_MAX_DIM / max(h, w)
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-    # 1. Sharpness (OpenCV Laplacian Variance) — uses 1024px resize internally
+    # 1. Expert Signals
     sharpness = _compute_sharpness(img)
-
-    # 2. Aesthetic (pyiqa MUSIQ + CLIPIQA)
     aesthetic = _compute_aesthetic_from_img(img)
-
-    # 3. Exposure (Histogram Analysis) — now with bimodal detection
     exposure = _compute_exposure(img)
 
-    # 4. Semantic Intelligence (Ollama + RAG)
-    # We use a temp file for vision analysis if input is bytes.
-    # Priority: rag_similarity_score (ChromaDB) > analyst text similarity > neutral 50.0
     description = ""
-    # Seed with the RAG score if available; analyst text-similarity can override below.
-    similarity = rag_similarity_score if rag_similarity_score is not None else 50.0
+    # Seed with the RAG score if available
+    vlm_preference = rag_similarity_score if rag_similarity_score is not None else 50.0
 
     if analyst:
-        tmp_path = None
         if isinstance(image_input, bytes):
             tmp_path = tempfile.mktemp(suffix=".jpg")
             cv2.imwrite(tmp_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
-            description = analyst.analyze_image(tmp_path)
+            description_res = analyst.analyze_image(tmp_path)
+            description = description_res['description']
             if tmp_path and os.path.exists(tmp_path): os.unlink(tmp_path)
         else:
-            description = analyst.analyze_image(image_input)
+            description_res = analyst.analyze_image(image_input)
+            description = description_res['description']
 
-        # Analyst text-similarity overwrites the RAG seed when a VisionAnalyst
-        # is active — the text-based signal is considered more specific.
-        similarity = analyst.get_similarity_score(description)
-
-    # 4. Composite Score (Genre-Aware Weighted Average)
+    # 2. Dynamic Weighting (MoE)
     genre = detect_genre(exif)
     profile = GENRE_PROFILES.get(genre, GENRE_PROFILES["general"])
+    
+    tau = _compute_vlm_trust(golden_success_rate)
     
     w_sharp = profile["sharpness_weight"]
     w_aesth = profile["aesthetic_weight"]
     w_expo = profile["exposure_weight"]
     
-    # Semantic weight: Part of the aesthetic bucket
-    # We use a 70/30 split between general aesthetic and personal preference
-    # to maintain KL Divergence guardrails (Personalization < 30% total influence).
-    final_aesthetic = (aesthetic * 0.7) + (similarity * 0.3)
+    # τ takes from aesthetic budget
+    w_vlm = tau * w_aesth
+    w_aesth_adj = (1.0 - tau) * w_aesth
     
-    composite = (sharpness * w_sharp) + (final_aesthetic * w_aesth) + (exposure * w_expo)
+    weights_audit = {
+        "w_sharpness": round(w_sharp, 3),
+        "w_aesthetic": round(w_aesth_adj, 3),
+        "w_exposure": round(w_expo, 3),
+        "w_vlm": round(w_vlm, 3),
+        "genre": genre
+    }
+
+    composite = (sharpness * w_sharp) + (aesthetic * w_aesth_adj) + (exposure * w_expo) + (vlm_preference * w_vlm)
     tier = Tier.from_score(composite)
 
-    # Recovery potential: sharp but poorly exposed/composed photos
-    # can often be rescued in post-processing (shadows, brightness, colors)
+    # 3. Safety Gate (Discordance)
+    composite, tier, discordance_flag = _apply_discordance_gate(
+        sharpness, exposure, vlm_preference, composite, tier
+    )
+
+    # 4. Recovery & Flags
     recovery = ""
-    if tier in (Tier.CULL, Tier.REVIEW):
-        if sharpness >= 60:
-            # Sharp photo dragged down by exposure/aesthetic — very recoverable
-            recovery = "high"
-        elif sharpness >= 40:
-            # Moderately sharp — some recovery possible
-            recovery = "medium"
-        elif sharpness >= 25 and exposure >= 30:
-            # Slightly soft but not hopeless, exposure workable
-            recovery = "low"
+    if discordance_flag and discordance_flag.triggered:
+        recovery = "discordance_review"
+    elif tier in (Tier.CULL, Tier.REVIEW):
+        if sharpness >= 60: recovery = "high"
+        elif sharpness >= 40: recovery = "medium"
+        elif sharpness >= 25 and exposure >= 30: recovery = "low"
 
     return QualityScore(
         sharpness=round(sharpness, 1),
@@ -206,9 +191,46 @@ def classify_with_analyst(
         tier=tier,
         recovery_potential=recovery,
         semantic_description=description,
-        semantic_similarity=similarity,
+        semantic_similarity=vlm_preference,
+        vlm_trust_tau=tau,
+        weights_used=weights_audit,
+        discordance=discordance_flag,
         processing_time=round(time.time() - start, 3),
     )
+
+def _compute_vlm_trust(golden_success_rate: Optional[float]) -> float:
+    """Map accuracy [0.7, 0.9] to trust τ [0.0, 0.6]."""
+    if golden_success_rate is None or golden_success_rate < 0.70:
+        return 0.0
+    if golden_success_rate >= 0.90:
+        return 0.60
+    
+    normalized = (golden_success_rate - 0.70) / 0.20
+    return round(normalized * 0.60, 4)
+
+def _apply_discordance_gate(sharpness, exposure, vlm_preference, composite, tier):
+    from models import DiscordanceFlag
+    flag = None
+    
+    # Rule 1: Hard Sharpness Floor (clamped to Review)
+    if sharpness < 20.0 and tier.rank > Tier.REVIEW.rank:
+        flag = DiscordanceFlag(
+            triggered=True, expert_pair="hard_floor_sharpness",
+            delta=vlm_preference - sharpness, vlm_score=vlm_preference,
+            frozen_score=sharpness, action="clamp_to_review"
+        )
+        tier = Tier.REVIEW
+        composite = min(composite, 59.9)
+
+    # Rule 2: Bidirectional Discordance Flag (Human Audit required)
+    elif abs(vlm_preference - sharpness) > 60.0:
+        flag = DiscordanceFlag(
+            triggered=True, expert_pair="vlm_vs_sharpness",
+            delta=abs(vlm_preference - sharpness), vlm_score=vlm_preference,
+            frozen_score=sharpness, action="flag_review"
+        )
+    
+    return composite, tier, flag
 
 
 # ─── Signal 1: Sharpness (Laplacian Variance) ────────────────────────

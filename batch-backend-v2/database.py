@@ -61,12 +61,67 @@ class ModelRegistry(Base):
     __tablename__ = 'table_models'
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False)  # e.g., "laplacian_v1", "ollama_llava_v2", "lora_dark_moody_v1.0"
+    name = Column(String(100), unique=True, nullable=False)  # e.g., "moondream", "lora_v1"
     model_type = Column(String(50), nullable=False)          # e.g., "heuristics", "vlm", "lora_weights"
     is_production = Column(Boolean, default=False)
+    
+    # ── Model Agility v2 ──
+    ollama_tag = Column(Text, nullable=True)                 # "moondream:latest", "llava:13b"
+    architecture = Column(Text, nullable=True)               # "moondream", "llava"
+    param_count_b = Column(Float, nullable=True)             # 1.8, 7.0, 13.0
+    quantization = Column(Text, nullable=True)               # "q4_K_M", "q8_0"
+    
+    parent_model_id = Column(Integer, ForeignKey('table_models.id'), nullable=True)
+    lineage_type = Column(String(50), nullable=True)         # "base", "lora_finetune"
+    lora_adapter_path = Column(Text, nullable=True)          # /path/to/adapter.gguf
+    
+    status = Column(String(20), default='candidate', nullable=False) # 'candidate', 'production', 'retired'
+    
+    # ── Resource & Quality KPIs ──
+    vram_mb = Column(Integer, nullable=True)
+    tokens_per_sec = Column(Float, nullable=True)
+    golden_accuracy = Column(Float, nullable=True)
+    eval_report = Column(Text, nullable=True)                # JSON blob
+    
     created_at = Column(DateTime, default=func.now())
+    promoted_at = Column(DateTime, nullable=True)
+    retired_at = Column(DateTime, nullable=True)
 
     inferences = relationship("Inference", back_populates="model")
+    children = relationship("ModelRegistry", backref=relationship("ModelRegistry", remote_side=[id]))
+
+
+class PromptVersion(Base):
+    """
+    System and User prompt versioning for VLM supervision.
+    """
+    __tablename__ = 'table_prompt_versions'
+
+    id = Column(Integer, primary_key=True, index=True)
+    version = Column(String(50), unique=True, nullable=False)
+    system_prompt = Column(Text, nullable=False)
+    user_prompt = Column(Text, nullable=False)
+    template_hash = Column(String(64), nullable=False)
+    
+    # 'draft' | 'testing' | 'production' | 'retired'
+    status = Column(String(20), default='draft', nullable=False)
+    is_production = Column(Boolean, default=False, nullable=False)
+    
+    author = Column(String(50), default='system', nullable=False)
+    parent_version = Column(String(50), ForeignKey('table_prompt_versions.version'), nullable=True)
+    change_notes = Column(Text, nullable=True)
+    
+    total_inferences = Column(Integer, default=0, nullable=False)
+    golden_success_rate = Column(Float, nullable=True)
+    training_success_rate = Column(Float, nullable=True)
+    avg_confidence = Column(Float, nullable=True)
+    avg_processing_ms = Column(Float, nullable=True)
+    
+    created_at = Column(DateTime, default=func.now())
+    promoted_at = Column(DateTime, nullable=True)
+    retired_at = Column(DateTime, nullable=True)
+
+    inferences = relationship("Inference", back_populates="prompt")
 
 
 class Inference(Base):
@@ -78,12 +133,12 @@ class Inference(Base):
     id = Column(Integer, primary_key=True, index=True)
     media_id = Column(Integer, ForeignKey('table_media.id'), nullable=False)
     model_id = Column(Integer, ForeignKey('table_models.id'), nullable=False)
+    prompt_version = Column(String(50), ForeignKey('table_prompt_versions.version'), nullable=True)
     
     # Store string labels, JSON dicts, or comma separated tags
     inference_value = Column(Text, nullable=True)
     
     # Vector Embedding Blob (Feature Store logic)
-    # In SQLite we use Text or LargeBinary. In Postgres this would be a pgvector Vector() column.
     embedding_blob = Column(Text, nullable=True) 
     
     confidence = Column(Float, nullable=True)
@@ -92,6 +147,7 @@ class Inference(Base):
 
     media = relationship("Media", back_populates="inferences")
     model = relationship("ModelRegistry", back_populates="inferences")
+    prompt = relationship("PromptVersion", back_populates="inferences")
 
 
 class Annotation(Base):

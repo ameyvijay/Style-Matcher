@@ -148,6 +148,10 @@ class Pipeline:
                     ctx.db.close()
                 except Exception:
                     pass
+            
+            # 🛑 Ensure session is removed from abort registry if it was there
+            self._abort_registry.discard(ctx.session_id)
+
             # Clean up workspace directory
             shutil.rmtree(
                 os.path.join(ctx.target_folder, ".antigravity_workspace"),
@@ -176,6 +180,7 @@ class Pipeline:
         Atomic rollback sequence. Removes created files and prunes
         pending DB records. Mirrors original batch_orchestrator L359-372.
         """
+        print(f"DEBUG: Starting rollback for {ctx.session_id}")
         yield yield_log(
             "🚨 ABORT SIGNAL RECEIVED. Initiating Atomic Rollback...", "warn"
         )
@@ -202,4 +207,3 @@ class Pipeline:
         yield yield_log(
             "Rollback Complete. Session Terminated Safely.", "warn"
         )
-        self._abort_registry.discard(ctx.session_id)

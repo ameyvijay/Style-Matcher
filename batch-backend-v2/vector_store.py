@@ -23,43 +23,60 @@ class ChromaManager:
     embeddings, enabling cosine-similarity retrieval for the Visual RAG loop.
     """
 
-    COLLECTION_NAMES = ("accepted_preferences", "rejected_preferences")
+    COLLECTION_NAMES = ("accepted_preferences", "rejected_preferences", "golden_exemplars")
 
     def __init__(self, persist_dir: str = _CHROMA_DIR):
         os.makedirs(persist_dir, exist_ok=True)
         self.client = chromadb.PersistentClient(path=persist_dir)
 
-        # Pre-create both collections (get_or_create is idempotent)
+        # Pre-create all collections (get_or_create is idempotent)
         self.collections = {}
         for name in self.COLLECTION_NAMES:
             self.collections[name] = self.client.get_or_create_collection(
                 name=name,
-                metadata={"hnsw:space": "cosine"},
+                metadata={
+                    "hnsw:space": "cosine",
+                    "hnsw:construction_ef": 200,
+                    "hnsw:search_ef": 50,
+                    "hnsw:M": 16
+                },
             )
         print(f"✅ ChromaManager: Persistent store ready at {persist_dir}")
 
     def add_embedding(
         self,
         collection_name: str,
-        photo_hash: str,
+        doc_id: str,
         embedding: list[float],
         metadata: dict,
     ) -> None:
         """
         Upsert a single embedding into the specified collection.
-
-        Args:
-            collection_name: One of ``COLLECTION_NAMES``.
-            photo_hash:      Unique document ID (SHA-256 of filename+size).
-            embedding:       512-dim float vector from ClipEmbedder.
-            metadata:        Arbitrary key/value pairs stored alongside the vector.
+        Using version-scoped composite IDs: {photo_hash}__{prompt_version}
         """
         collection = self.collections[collection_name]
         collection.upsert(
-            ids=[photo_hash],
+            ids=[doc_id],
             embeddings=[embedding],
             metadatas=[metadata],
         )
+
+    def get_embedding(self, collection_name: str, doc_id: str) -> dict | None:
+        """Retrieve a specific embedding by ID."""
+        collection = self.collections[collection_name]
+        res = collection.get(ids=[doc_id], include=["embeddings", "metadatas"])
+        if res and res["ids"]:
+            return {
+                "id": res["ids"][0],
+                "embedding": res["embeddings"][0],
+                "metadata": res["metadatas"][0]
+            }
+        return None
+
+    def delete_embedding(self, collection_name: str, doc_id: str) -> None:
+        """Delete a specific embedding by ID."""
+        collection = self.collections[collection_name]
+        collection.delete(ids=[doc_id])
 
     def query_similar(
         self,
