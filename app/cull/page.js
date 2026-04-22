@@ -170,6 +170,8 @@ export default function CullPage() {
       markSyncing();
 
       // Optimistic: advance the top index first (instant UX)
+      // For skips, we still remove it from the local list; the backend will re-enqueue it 
+      // at the tail of the Firestore collection.
       setPhotos((prev) => prev.filter((p) => p.id !== photoId));
 
       // Revoke object URLs for the evicted card to free memory
@@ -181,22 +183,31 @@ export default function CullPage() {
       }
 
       try {
-        const photoRef = doc(db, "photos", photoId);
-        await updateDoc(photoRef, {
-          status,
-          user_id: auth.currentUser?.uid || "local_testing_user",
-          decided_at: new Date().toISOString(),
-          swipe_duration_ms: swipeDurationMs || null,
-          // Full telemetry write-back (Step 3 of the audit)
-          ai_tier_confirmed: aiTier || null,
-          sync_confirmed_at: new Date().toISOString(),
-        });
+        if (status === "skipped") {
+            const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            await fetch(`${baseUrl}/api/annotations/skip`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ photo_id: photoId, batch_id: batchId }),
+            });
+        } else {
+            const photoRef = doc(db, "photos", photoId);
+            await updateDoc(photoRef, {
+              status,
+              user_id: auth.currentUser?.uid || "local_testing_user",
+              decided_at: new Date().toISOString(),
+              swipe_duration_ms: swipeDurationMs || null,
+              // Full telemetry write-back (Step 3 of the audit)
+              ai_tier_confirmed: aiTier || null,
+              sync_confirmed_at: new Date().toISOString(),
+            });
 
-        // Mark this photo as synced (200 OK received)
-        setSyncedPhotoIds((prev) => new Set([...prev, photoId]));
+            // Mark this photo as synced (200 OK received)
+            setSyncedPhotoIds((prev) => new Set([...prev, photoId]));
 
-        const batchRef = doc(db, "batches", batchId);
-        await updateDoc(batchRef, { processed_count: increment(1) });
+            const batchRef = doc(db, "batches", batchId);
+            await updateDoc(batchRef, { processed_count: increment(1) });
+        }
 
         markSyncComplete();
       } catch (err) {

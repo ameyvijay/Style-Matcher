@@ -137,9 +137,12 @@ def classify_with_analyst(
         if isinstance(image_input, bytes):
             tmp_path = tempfile.mktemp(suffix=".jpg")
             cv2.imwrite(tmp_path, img, [cv2.IMWRITE_JPEG_QUALITY, 90])
-            description_res = analyst.analyze_image(tmp_path)
-            description = description_res['description']
-            if tmp_path and os.path.exists(tmp_path): os.unlink(tmp_path)
+            try:
+                description_res = analyst.analyze_image(tmp_path)
+                description = description_res['description']
+            finally:
+                if tmp_path and os.path.exists(tmp_path): 
+                    os.unlink(tmp_path)
         else:
             description_res = analyst.analyze_image(image_input)
             description = description_res['description']

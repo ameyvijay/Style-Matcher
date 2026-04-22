@@ -8,6 +8,9 @@ Usage:
 from __future__ import annotations
 
 import os
+# Fix for gRPC + subprocess/fork on macOS
+os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
+
 import httpx
 import psutil
 import subprocess
@@ -18,6 +21,7 @@ from datetime import datetime
 from services.prompt_service import PromptService
 from services.rag_automation import RAGAutomationService
 from services.model_evaluator import ModelEvaluatorService
+from services.export_service import DatasetExportService
 from config import SYSTEM_TOTAL_RAM_GB, HEADROOM_GB, MEMORY_GATE_THRESHOLD_PCT
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
@@ -86,6 +90,49 @@ async def get_promotable_snapshots(db: SessionLocal = Depends(get_db)):
     service = RAGAutomationService(db)
     return service.get_promotable_snapshots()
 
+@app.get("/api/admin/vitals")
+async def get_system_vitals():
+    """Phase 4: Real-time hardware telemetry (M4 optimized)."""
+    import psutil
+    import subprocess
+    from config import SYSTEM_TOTAL_RAM_GB, SAFE_VLM_MAX_GB
+    
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    
+    # Thermal check proxy (macOS)
+    thermal = "Nominal"
+    try:
+        res = subprocess.run(["pmset", "-g", "therm"], capture_output=True, text=True, timeout=1)
+        # If any 'warning' or 'limit' less than 100 is found, it's throttled
+        if "warning" in res.stdout.lower() or "limit" in res.stdout.lower():
+            if "100" not in res.stdout:
+                thermal = "Throttled"
+    except: pass
+
+    return {
+        "memory": {
+            "total_gb": SYSTEM_TOTAL_RAM_GB,
+            "used_gb": round(mem.used / (1024**3), 2),
+            "percent": mem.percent,
+            "vlm_safe_ceiling_gb": SAFE_VLM_MAX_GB
+        },
+        "disk": {
+            "total_gb": round(disk.total / (1024**3), 2),
+            "free_gb": round(disk.free / (1024**3), 2),
+            "percent": disk.percent
+        },
+        "thermal": thermal,
+        "cpu_count": psutil.cpu_count(),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/api/admin/export-dataset")
+async def export_dataset(db: SessionLocal = Depends(get_db)):
+    """Feature 10: Export curated decisions + VLM data to JSONL."""
+    service = DatasetExportService(db)
+    return service.export_curated_dataset()
+
 @app.post("/api/admin/promote-golden-set")
 async def promote_golden_set(snapshot_version: str, db: SessionLocal = Depends(get_db)):
     service = RAGAutomationService(db)
@@ -98,6 +145,39 @@ async def cleanup_stale_annotations(db: SessionLocal = Depends(get_db)):
     janitor = JanitorService(max_age_days=10)
     count = janitor.purge_local_annotations(db)
     return {"status": "cleanup_complete", "deleted_count": count}
+
+class PhotoSkip(BaseModel):
+    photo_id: str
+    batch_id: str
+    reason: str = "undecided"
+
+@app.post("/api/annotations/skip")
+async def skip_photo(payload: PhotoSkip):
+    """
+    Re-enqueue a photo by updating its timestamp in Firestore.
+    This moves it to the end of the queue for later review.
+    """
+    try:
+        from firebase_bridge import get_bridge
+        bridge = get_bridge()
+        if not bridge.initialize():
+            raise HTTPException(status_code=500, detail="Firebase unreachable")
+        
+        from firebase_admin import firestore
+        db = firestore.client()
+        photo_ref = db.collection("photos").document(payload.photo_id)
+        
+        # Update timestamp to NOW to move it to the tail of the queue
+        # (Assuming frontend sorts by timestamp ascending)
+        photo_ref.update({
+            "timestamp": firestore.SERVER_TIMESTAMP,
+            "skip_count": firestore.Increment(1),
+            "last_skipped_at": firestore.SERVER_TIMESTAMP
+        })
+        
+        return {"status": "skipped", "photo_id": payload.photo_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/annotations/reverse")
 async def reverse_annotation(payload: DecisionReversal, db: SessionLocal = Depends(get_db)):
@@ -208,31 +288,29 @@ async def bootstrap_golden_set(payload: BootstrapRequest, db: SessionLocal = Dep
 async def ensure_memory_headroom(threshold_pct: float = None):
     """
     Adaptive Memory Guard: Check Unified Memory on M4.
-    If RAM usage is too high, proactively unload Ollama models.
-    Uses threshold from config.py if not provided.
+    MANDATORY FLUSH: Always unload models before a batch starts.
     """
     target_threshold = threshold_pct or MEMORY_GATE_THRESHOLD_PCT
     mem = psutil.virtual_memory()
-    print(f"🧠 [Memory Guard] System RAM Usage: {mem.percent}% (Limit: {target_threshold}%)")
     
-    if mem.percent > target_threshold:
-        print(f"⚠️ [Memory Guard] Memory pressure high ({mem.percent}%). Evicting Ollama VLMs...")
-        ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-        try:
-            async with httpx.AsyncClient() as client:
-                # 1. Get all loaded models
-                tags_res = await client.get(f"{ollama_url}/api/tags", timeout=2.0)
-                if tags_res.status_code == 200:
-                    models = tags_res.json().get("models", [])
-                    for m in models:
-                        # 2. Selective/Total Eviction: keep_alive: 0 unloads the model
-                        await client.post(f"{ollama_url}/api/generate", json={"model": m["name"], "keep_alive": 0}, timeout=2.0)
-                        print(f"✅ [Memory Guard] Unloaded model: {m['name']}")
-                
-                # 3. Kernel Page Reclaim Pause (Mandated by Architect)
-                await asyncio.sleep(3.0)
-        except Exception as e:
-            print(f"⚠️ [Memory Guard] Eviction failed: {e}")
+    # ── Mandatory Flush ──
+    print(f"🧠 [Memory Guard] Pre-batch Flush: Evicting VLM models from Unified Memory...")
+    ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    try:
+        async with httpx.AsyncClient() as client:
+            # 1. Get all loaded models
+            tags_res = await client.get(f"{ollama_url}/api/tags", timeout=2.0)
+            if tags_res.status_code == 200:
+                models = tags_res.json().get("models", [])
+                for m in models:
+                    # 2. Mandatory Eviction: keep_alive: 0 unloads the model
+                    await client.post(f"{ollama_url}/api/generate", json={"model": m["name"], "keep_alive": 0}, timeout=2.0)
+                    print(f"✅ [Memory Guard] Unloaded model: {m['name']}")
+            
+            # 3. Kernel Page Reclaim Pause
+            await asyncio.sleep(3.0)
+    except Exception as e:
+        print(f"⚠️ [Memory Guard] Flush warning: {e}")
     else:
         print("✅ [Memory Guard] Headroom sufficient.")
 
@@ -524,28 +602,26 @@ async def pick_folder():
 @app.get("/api/health/sync")
 async def get_sync_health():
     """
-    Hybrid-Cloud Telemetry: Pings Firestore Control Plane 
-    to report pending master renders to the Glassmorphism UI.
+    Lightweight heartbeat: Reports sync status without blocking.
     """
     db_local = SessionLocal()
     firestore_connected = False
     rendering_remaining = 0
-    
+
     try:
-        # 1. Check Local SQLite State (Legacy mapping)
+        # 1. Quick Local Check
         failed_count = db_local.query(SyncQueue).filter(SyncQueue.status == "FAILED").count()
-        
-        # 2. Check Firestore Control Plane (GA Standard)
+
+        # 2. Firestore check (with very short timeout)
         from firebase_admin import firestore
         try:
-            # We use a lightweight check to avoid blocking the health poll
             db_cloud = firestore.client()
-            pending_query = db_cloud.collection('photos').where('status', 'in', ['accepted', 'pending_render'])
-            results = pending_query.get(timeout=3.0)
-            rendering_remaining = len(results)
+            # Use a faster limit-1 query just to verify connection
+            db_cloud.collection('photos').limit(1).get(timeout=1.0)
             firestore_connected = True
-        except Exception as fe:
-            print(f"📡 [Control Plane] Offline: {fe}")
+            # Optional: Move the full count to a background cache if needed
+            rendering_remaining = 0 
+        except:
             firestore_connected = False
 
         return {
@@ -553,11 +629,10 @@ async def get_sync_health():
             "firestore_connected": firestore_connected,
             "rendering_remaining": rendering_remaining,
             "failed_directories": failed_count,
-            "active_queue": rendering_remaining 
+            "active_queue": rendering_remaining
         }
     finally:
         db_local.close()
-
 @app.get("/api/analytics")
 async def get_analytics():
     """Return Cohen's Kappa, Precision, Recall, F1 against Local DB."""
@@ -631,8 +706,12 @@ async def scan_only(request: BatchRequest):
             "message": f"Folder not found: {request.target_folder}",
         }
 
-    result = batch_orchestrator.scan_only(
+    await ensure_memory_headroom()
+
+    result = await asyncio.to_thread(
+        batch_orchestrator.scan_only,
         target_folder=request.target_folder,
+        session_id=request.session_id or "scan_only"
     )
 
     # Group filenames by tier for easy reading
@@ -662,7 +741,9 @@ async def scan_only(request: BatchRequest):
                 "tier": a.tier,
                 "score": a.composite_score,
                 "sharpness": a.sharpness_score,
+                "sharp": a.sharpness_score,
                 "aesthetic": a.aesthetic_score,
+                "aes": a.aesthetic_score,
                 "exposure": a.exposure_score,
                 "recovery_potential": a.recovery_potential,
                 "recovery_notes": a.recovery_notes,
@@ -742,7 +823,7 @@ async def batch_process_stream(
     Execute the batch pipeline and stream real-time JSON logs.
     Preserved for backward compatibility but the frontend now uses polling.
     """
-    await ensure_memory_headroom(threshold_pct=80.0)
+    await ensure_memory_headroom()
     
     return StreamingResponse(
         batch_orchestrator.stream_batch(target_folder, benchmark_folder, session_id),
@@ -769,7 +850,7 @@ async def batch_process(request: BatchRequest):
     Start batch processing in a background thread.
     The frontend polls GET /api/logs/{session_id} for progress.
     """
-    await ensure_memory_headroom(threshold_pct=80.0)
+    await ensure_memory_headroom()
 
     if not os.path.isdir(request.target_folder):
         return {"status": "error", "message": f"Folder not found: {request.target_folder}"}

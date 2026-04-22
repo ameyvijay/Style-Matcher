@@ -209,8 +209,18 @@ class TestPipelineRollback(unittest.TestCase):
             session_id="test_session",
         )
 
-        events = list(pipeline.run(ctx))
-
+        # Start the pipeline and inject the abort signal AFTER it clears stale signals
+        gen = pipeline.run(ctx)
+        
+        # Get the first event (Initializing)
+        next(gen)
+        
+        # Now inject the abort signal
+        abort_reg.add("test_session")
+        
+        # Consume the rest of the events
+        events = list(gen)
+        
         # Should contain rollback-related events
         event_types = [json.loads(e.strip())["type"] for e in events]
         self.assertIn("warn", event_types)

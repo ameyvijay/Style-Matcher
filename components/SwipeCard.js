@@ -216,22 +216,13 @@ export default function SwipeCard({
         onSwipeStart?.();
         onSwipe("rejected", ms);
 
-      // Vertical: skip / review later (stub — backend not wired)
+      // Vertical: skip / review later
       } else if (info.offset.y < -SKIP_THRESHOLD) {
-        /**
-         * TODO (Skip / Review Later):
-         * 1. Call onSwipe("skipped", ms) once the backend endpoint is ready.
-         * 2. POST /api/annotations/skip { photo_hash: photo.photo_hash }
-         *    Backend should re-enqueue the photo at the tail of the Firestore queue
-         *    without writing a terminal Annotation row.
-         * 3. Update the HiLT Swipe queue count badge to reflect pending skips.
-         */
-        console.log("[SwipeCard] ⏭ Skip gesture detected — endpoint not yet wired.", { photo_hash: photo.photo_hash, ms });
-        // onSwipeStart?.();
-        // onSwipe("skipped", ms);
+        onSwipeStart?.();
+        onSwipe("skipped", ms);
       }
     },
-    [onSwipe, onSwipeStart, photo.photo_hash]
+    [onSwipe, onSwipeStart]
   );
 
   // ── Zoom open ────────────────────────────────────────────────────────
@@ -323,9 +314,9 @@ export default function SwipeCard({
   ].filter(Boolean);
 
   const scores = [
-    { label: "Sharpness", value: photo.sharpness_score ?? null, color: "#60a5fa" },
-    { label: "Aesthetic",  value: photo.aesthetic_score  ?? null, color: "#a78bfa" },
-    { label: "Exposure",   value: photo.exposure_score   ?? null, color: "#10b981" },
+    { label: "Sharpness", value: photo.sharpness_score ?? photo.sharpness ?? photo.sharp ?? null, color: "#60a5fa" },
+    { label: "Aesthetic",  value: photo.aesthetic_score  ?? photo.aesthetic ?? photo.aes ?? null, color: "#a78bfa" },
+    { label: "Exposure",   value: photo.exposure_score   ?? photo.exposure ?? null, color: "#10b981" },
     { label: "Composite",  value: photo.composite_score  ?? photo.score ?? null, color: "#f59e0b" },
   ];
 
@@ -359,12 +350,7 @@ export default function SwipeCard({
       <motion.div
         style={{
           x: isTop ? x : 0,
-          /**
-           * TODO (Skip gesture): swap `y: stackY` for `y: isTop ? y : stackY` once the
-           * skip feature is fully implemented so the card physically moves upward on drag.
-           * Keeping it at stackY for non-top cards ensures the stack perspective is correct.
-           */
-          y: stackY,
+          y: isTop ? y : stackY,
           rotate: isTop ? rotate : 0,
           opacity: isTop ? cardOpacity : 1,
           scale: stackScale,
@@ -376,17 +362,10 @@ export default function SwipeCard({
         dragConstraints={{
           left: 0,
           right: 0,
-          /**
-           * TODO (Skip / Review Later):
-           * top: 0 allows upward drag. Set to a positive number once the skip
-           * action is fully implemented to add intentional resistance:
-           *   top: -SKIP_THRESHOLD * 1.5
-           * bottom: 0 reserves downward drag for a future "Super Cull" gesture.
-           */
-          top: 0,
+          top: -SKIP_THRESHOLD * 1.5,
           bottom: 0,
         }}
-        dragElastic={0.11}
+        dragElastic={0.15}
         onDragEnd={handleDragEnd}
       >
         <div style={styles.card}>

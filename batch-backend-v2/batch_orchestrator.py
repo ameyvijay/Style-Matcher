@@ -81,21 +81,29 @@ def stream_batch(
 # Reuses DiscoveryStage and AssessmentStage to prevent logic drift
 # in tier reconciliation between scanner and full pipeline.
 
-def scan_only(target_folder: str) -> BatchResult:
+def scan_only(target_folder: str, session_id: str = "scan_only") -> BatchResult:
     """Read-only scan: score all images WITHOUT modifying anything."""
+    from pipeline.pipeline_runner import SESSION_REGISTRY
+    
+    # Register session for Telemetry visibility
+    SESSION_REGISTRY[session_id] = {"status": "running", "log_path": None}
+    
     batch_start = time.time()
-
-    # Construct a lightweight context (no rollback tracking needed)
-    ctx = PipelineContext(
-        target_folder=target_folder,
-        session_id="scan_only",
-    )
-
-    db = SessionLocal()
-    ctx.db = db
-
     try:
+        # Construct a lightweight context
+        ctx = PipelineContext(
+            target_folder=target_folder,
+            session_id=session_id,
+        )
+        # Link to global abort registry
+        ctx.abort_registry = ABORT_REGISTRY
+
+        db = SessionLocal()
+        ctx.db = db
+        assessments = []
+
         # Stage 1: Discovery — reuse the same filesystem scan logic
+        from pipeline.stages.discovery import DiscoveryStage
         discovery = DiscoveryStage()
         # Consume the generator to execute discovery
         for _ in discovery.execute(ctx):
@@ -105,21 +113,26 @@ def scan_only(target_folder: str) -> BatchResult:
             return BatchResult()
 
         # Stage 2: Assessment — reuse the same EXIF/quality/tier logic
-        assessment = AssessmentStage()
-        for _ in assessment.execute(ctx):
-            pass  # Discard SSE events in scan-only mode
+        from pipeline.stages.assessment import AssessmentStage
+        assessment_stage = AssessmentStage()
+        for stem_idx, stem in enumerate(ctx.stems, 1):
+            ctx.current_stem = stem
+            ctx.current_stem_idx = stem_idx
+            # Consume generator (discard SSE events)
+            for _ in assessment_stage.execute(ctx):
+                pass
 
-        # Build result from assessed groups (no enhancement)
+        # Build result from assessed groups
         result = ctx.result or BatchResult(total_scanned=ctx.total_files)
-        assessments: list[ImageAssessment] = []
-        processed_count = 0
-
+        
+        # The AssessmentStage already populated ctx._assessed_groups with MoE-calculated QualityScores
         for stem, group_results, max_tier, raw_master in ctx._assessed_groups:
             for res in group_results:
-                processed_count += 1
                 filename = res["filename"]
-                quality = res["quality"]
+                quality = res["quality"] # Already MoE-scored in AssessmentStage
                 exif = res["exif"]
+                
+                # Ensure the quality tier reflects the reconciled group tier
                 quality.tier = max_tier
 
                 if max_tier == Tier.PORTFOLIO:
@@ -160,6 +173,8 @@ def scan_only(target_folder: str) -> BatchResult:
 
     finally:
         db.close()
+        # Mark as completed in registry for telemetry visibility
+        SESSION_REGISTRY[session_id]["status"] = "completed"
 
 
 # ─── Self-Tests ────────────────────────────────────────────────────

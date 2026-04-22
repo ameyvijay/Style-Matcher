@@ -5,7 +5,7 @@ from typing import List, Optional
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship, backref
 from sqlalchemy.sql import func
 
 # Initialize Base and Engine
@@ -88,7 +88,6 @@ class ModelRegistry(Base):
     retired_at = Column(DateTime, nullable=True)
 
     inferences = relationship("Inference", back_populates="model")
-    children = relationship("ModelRegistry", backref=relationship("ModelRegistry", remote_side=[id]))
 
 
 class PromptVersion(Base):

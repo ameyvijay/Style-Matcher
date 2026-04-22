@@ -2,7 +2,7 @@ import os
 import time
 import json
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
@@ -162,8 +162,13 @@ class FirebaseBridge:
                     'score': photo.get('composite_score', 0),
                     'composite_score': photo.get('composite_score', 0),
                     'sharpness_score': photo.get('sharpness_score', None),
+                    'sharpness': photo.get('sharpness_score', None),
+                    'sharp': photo.get('sharpness_score', None),
                     'aesthetic_score': photo.get('aesthetic_score', None),
+                    'aesthetic': photo.get('aesthetic_score', None),
+                    'aes': photo.get('aesthetic_score', None),
                     'exposure_score': photo.get('exposure_score', None),
+                    'exposure': photo.get('exposure_score', None),
                     'tier': photo.get('tier', 'review'),
                     'timestamp': firestore.SERVER_TIMESTAMP,
                     # ── AI Coach ──────────────────────────────────────

@@ -16,8 +16,8 @@ VLM_BUDGET_GB = SYSTEM_TOTAL_RAM_GB - SYSTEM_OVERHEAD_GB
 SAFE_VLM_MAX_GB = VLM_BUDGET_GB - HEADROOM_GB
 
 # Pre-flight Memory Gate (Percentage)
-# On a 24GB system, 45% is ~10.8GB used. 
-# This leaves ~2.6GB of "leak" tolerance above system overhead.
-MEMORY_GATE_THRESHOLD_PCT = 45.0 if SYSTEM_TOTAL_RAM_GB <= 24 else 55.0
+# On a 24GB system, 75% is ~18GB used. 
+# This provides ample headroom for high-res RAW processing without evicting models.
+MEMORY_GATE_THRESHOLD_PCT = 75.0
 
 print(f"🖥️ [Config] System RAM: {SYSTEM_TOTAL_RAM_GB}GB | VLM Budget: {VLM_BUDGET_GB}GB | Safe Max: {SAFE_VLM_MAX_GB}GB")

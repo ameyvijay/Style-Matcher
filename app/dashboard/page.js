@@ -21,19 +21,21 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let isActive = true;
+    const controller = new AbortController();
 
     async function fetchAnalytics() {
       try {
         const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const response = await fetch(`${baseUrl}/api/analytics`);
-        if (!response.ok) throw new Error("Failed to fetch analytics");
-        const data = await response.json();
+        const response = await fetch(`${baseUrl}/api/analytics`, { signal: controller.signal });
+        if (!response.ok) return; // Silent skip if backend busy
         
+        const data = await response.json();
         if (isActive && data.stats) {
           setStats(data.stats);
         }
       } catch (error) {
-        console.error("Error fetching analytics:", error);
+        if (error.name === 'AbortError') return;
+        console.warn("Backend busy - skipping analytics poll");
       } finally {
         if (isActive) setLoading(false);
       }
@@ -46,6 +48,7 @@ export default function DashboardPage() {
 
     return () => {
       isActive = false;
+      controller.abort();
       clearInterval(intervalId);
     };
   }, []);

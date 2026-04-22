@@ -676,7 +676,10 @@ def save_report_json(
                 "composite_score": a.composite_score,
                 "scores": {
                     "sharpness": a.sharpness_score,
+                    "sharp": a.sharpness_score,
                     "aesthetic": a.aesthetic_score,
+                    "aesthetic_score": a.aesthetic_score,
+                    "aes": a.aesthetic_score,
                     "exposure": a.exposure_score,
                 },
                 "reasoning": a.reasoning,

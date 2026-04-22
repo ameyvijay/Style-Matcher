@@ -6,7 +6,7 @@ const VersionBadge = () => {
   return (
     <div className="version-badge">
       <Info size={14} />
-      <span>v2.0.0 — Antigravity Engine (Built: 2026-04-12)</span>
+      <span>v2.1.5 — Antigravity Intelligence (Built: 2026-04-21)</span>
       <style jsx>{`
         .version-badge {
           position: fixed;

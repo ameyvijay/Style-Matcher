@@ -32,6 +32,10 @@ class DiscoveryStage(ProcessingStage):
     def name(self) -> str:
         return "Discovery"
 
+    @property
+    def is_global(self) -> bool:
+        return True
+
     def execute(self, ctx: PipelineContext) -> Generator[str, None, None]:
         # ── Validate target folder ───────────────────────────────────
         if not os.path.isdir(ctx.target_folder):
@@ -44,12 +48,12 @@ class DiscoveryStage(ProcessingStage):
         # ── Create output directories ────────────────────────────────
         ctx.enhanced_dir = os.path.join(ctx.target_folder, "Enhanced")
         ctx.rejected_dir = os.path.join(ctx.target_folder, "Rejected")
-        ctx.rlhf_input_dir = os.path.join(ctx.target_folder, "For RLHF input")
+        ctx.rlhf_input_dir = os.path.join(ctx.target_folder, "HiTL")
         ctx.workspace_dir = os.path.join(
             ctx.target_folder, ".antigravity_workspace"
         )
 
-        for d in [ctx.workspace_dir]:
+        for d in [ctx.enhanced_dir, ctx.rlhf_input_dir, ctx.workspace_dir]:
             os.makedirs(d, exist_ok=True)
 
         # ── Scan for images ──────────────────────────────────────────
@@ -58,6 +62,10 @@ class DiscoveryStage(ProcessingStage):
         groups: dict[str, list[str]] = {}
         all_files = sorted(os.listdir(ctx.target_folder))
         for f in all_files:
+            # 🛑 Check for Abort Request
+            if ctx.session_id in ctx.abort_registry:
+                return
+
             fpath = os.path.join(ctx.target_folder, f)
             if os.path.isfile(fpath) and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS:
                 stem = Path(f).stem

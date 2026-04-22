@@ -198,10 +198,11 @@ function ModelOpsTab() {
     try {
       const res = await fetch(`${baseUrl}/api/prompts`);
       const data = await res.json();
-      setPrompts(data);
-      const active = data.find(p => p.is_production);
+      const promptsArray = Array.isArray(data) ? data : [];
+      setPrompts(promptsArray);
+      const active = promptsArray.find(p => p.is_production);
       if (active) setActivePrompt(active);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setPrompts([]); }
   };
 
   const fetchRecommendations = async () => {
@@ -286,7 +287,8 @@ function ModelOpsTab() {
       onTrigger: async () => {
         try {
           const res = await fetch(`${baseUrl}/api/admin/promotable-snapshots`);
-          const snaps = await res.json();
+          const data = await res.json();
+          const snaps = Array.isArray(data) ? data : [];
           if (snaps.length === 0) {
             alert("No Golden Set snapshots found. Create one first in Data Governance.");
             return;
@@ -295,8 +297,8 @@ function ModelOpsTab() {
           if (!version) return;
           
           const promoteRes = await fetch(`${baseUrl}/api/admin/promote-golden-set?snapshot_version=${version}`, { method: "POST" });
-          const data = await promoteRes.json();
-          alert(`Promoted ${data.promoted} vectors to RAG collection.`);
+          const resData = await promoteRes.json();
+          alert(`Promoted ${resData.promoted} vectors to RAG collection.`);
         } catch (e) { alert("RAG Rebuild Failed"); }
       }
     },
@@ -310,21 +312,26 @@ function ModelOpsTab() {
       onTrigger: async () => {
         const tag = prompt("Enter Candidate Model Tag (Ollama):\ne.g., moondream:v2, llava:7b");
         if (!tag) return;
-        const res = await fetch(`${baseUrl}/api/admin/promotable-snapshots`);
-        const snaps = await res.json();
-        const version = prompt("Enter Snapshot Version for Evaluation:\n" + snaps.map(s => s.version).join("\n"));
-        if (!version) return;
-        
-        setIsTesting(true);
         try {
+          const res = await fetch(`${baseUrl}/api/admin/promotable-snapshots`);
+          const data = await res.json();
+          const snaps = Array.isArray(data) ? data : [];
+          if (snaps.length === 0) {
+            alert("No Golden Set snapshots found. Create one first in Data Governance.");
+            return;
+          }
+          const version = prompt("Enter Snapshot Version for Evaluation:\n" + snaps.map(s => s.version).join("\n"));
+          if (!version) return;
+          
+          setIsTesting(true);
           const evalRes = await fetch(`${baseUrl}/api/model/compare?candidate_tag=${tag}&snapshot_version=${version}`, { method: "POST" });
-          const data = await evalRes.json();
+          const evalData = await evalRes.json();
           setTestResults({
             version: `${tag} (Candidate)`,
-            accuracy: data.candidate.accuracy,
-            avg_latency: data.candidate.resources.p50_latency_ms,
-            total_tested: data.candidate.resources.images_evaluated,
-            verdict: data.verdict
+            accuracy: evalData.candidate.accuracy,
+            avg_latency: evalData.candidate.resources.p50_latency_ms,
+            total_tested: evalData.candidate.resources.images_evaluated,
+            verdict: evalData.verdict
           });
         } catch (e) { alert("Evaluation Failed"); }
         finally { setIsTesting(false); }
@@ -485,7 +492,7 @@ function ModelOpsTab() {
         )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          {prompts.map((p) => (
+          {(prompts || []).map((p) => (
             <div key={p.version} style={{ ...styles.promptCard, borderLeft: p.is_production ? "4px solid #10b981" : "4px solid rgba(255,255,255,0.1)" }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
@@ -541,23 +548,41 @@ function ModelOpsTab() {
 
 // ── Telemetry Tab ─────────────────────────────────────────────────────────────
 function TelemetryTab() {
-  const { Eye, Sparkles, ScanLine, MessageSquare, Cpu, HardDrive } = require("lucide-react");
+  const { Eye, Sparkles, ScanLine, MessageSquare, Cpu, HardDrive, Thermometer, Database } = require("lucide-react");
   const [telemetry, setTelemetry] = useState({ system: {}, models: {} });
+  const [vitals, setVitals] = useState(null);
 
   useEffect(() => {
-    async function fetchTelemetry() {
+    let isActive = true;
+    async function fetchData() {
       try {
         const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const res = await fetch(`${baseUrl}/api/admin/telemetry`);
-        const data = await res.json();
-        setTelemetry(data);
+        // Increase timeout for vitals during heavy RAW processing
+        const [telRes, vitRes] = await Promise.all([
+          fetch(`${baseUrl}/api/admin/telemetry`),
+          fetch(`${baseUrl}/api/admin/vitals`)
+        ]);
+        
+        if (!isActive) return;
+        
+        if (telRes.ok) {
+          const telData = await telRes.json();
+          setTelemetry(telData);
+        }
+        if (vitRes.ok) {
+          const vitData = await vitRes.json();
+          setVitals(vitData);
+        }
       } catch (e) {
-        console.error("Failed to fetch telemetry:", e);
+        console.warn("Telemetry poll delayed - backend processing heavy load");
       }
     }
-    fetchTelemetry();
-    const interval = setInterval(fetchTelemetry, 5000);
-    return () => clearInterval(interval);
+    fetchData();
+    const interval = setInterval(fetchData, 3000); // 3s for more real-time feel
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const models = [
@@ -603,21 +628,26 @@ function TelemetryTab() {
       </div>
 
       {/* Hardware Metrics Strip */}
-      <div style={{ display: "flex", gap: "1rem", marginBottom: "2rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
         <div style={styles.hwCard}>
           <Cpu size={14} color="var(--accent-base)" />
-          <span style={styles.hwLabel}>CPU Usage</span>
+          <span style={styles.hwLabel}>CPU</span>
           <span style={styles.hwValue}>{telemetry.system?.cpu_usage ?? "—"}%</span>
         </div>
         <div style={styles.hwCard}>
           <HardDrive size={14} color="#a78bfa" />
-          <span style={styles.hwLabel}>Unified Memory</span>
-          <span style={styles.hwValue}>{telemetry.system?.memory_usage ?? "—"}%</span>
+          <span style={styles.hwLabel}>VRAM</span>
+          <span style={styles.hwValue}>{vitals?.memory?.used_gb ?? "—"} / {vitals?.memory?.total_gb ?? "—"} GB</span>
         </div>
-        <div style={{ ...styles.hwCard, borderLeft: telemetry.system?.mps_available ? "3px solid #10b981" : "3px solid #f87171" }}>
-          <Sparkles size={14} color="#10b981" />
-          <span style={styles.hwLabel}>M4 Metal (MPS)</span>
-          <span style={styles.hwValue}>{telemetry.system?.mps_available ? "Active" : "Disabled"}</span>
+        <div style={styles.hwCard}>
+          <Thermometer size={14} color={vitals?.thermal === "Throttled" ? "#f87171" : "#fbbf24"} />
+          <span style={styles.hwLabel}>Thermal</span>
+          <span style={{ ...styles.hwValue, color: vitals?.thermal === "Throttled" ? "#f87171" : "#fff" }}>{vitals?.thermal ?? "—"}</span>
+        </div>
+        <div style={styles.hwCard}>
+          <Database size={14} color="#60a5fa" />
+          <span style={styles.hwLabel}>Disk Free</span>
+          <span style={styles.hwValue}>{vitals?.disk?.free_gb ?? "—"} GB</span>
         </div>
       </div>
 

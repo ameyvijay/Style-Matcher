@@ -6,6 +6,76 @@ import {
   Loader2, Trash2, FileWarning, Search, ChevronRight, Terminal, StopCircle, RotateCcw
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { useBatch } from "../../components/BatchContext";
+
+// ── Vitals Mini-Bar Component ──────────────────────────────────────────
+const VitalsBar = ({ vitals, cpu, models }) => {
+    const { Cpu, HardDrive, Thermometer, Database, ScanLine, Eye, Sparkles, MessageSquare } = require("lucide-react");
+    
+    const experts = [
+        { id: "laplacian_v2", label: "Focus", Icon: ScanLine },
+        { id: "nima_v1",      label: "Aesthetics", Icon: Eye },
+        { id: "clip_vit_b32", label: "Semantics", Icon: Sparkles },
+        { id: "ollama_vlm",   label: "VLM", Icon: MessageSquare }
+    ];
+
+    return (
+        <div style={{ marginBottom: "1.5rem" }}>
+            {/* Row 1: Hardware Vitals */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginBottom: "0.75rem" }}>
+                <div style={hwStyles.card}>
+                    <Cpu size={14} color="#60a5fa" />
+                    <span style={hwStyles.label}>CPU</span>
+                    <span style={hwStyles.value}>{cpu ?? "—"}%</span>
+                </div>
+                <div style={hwStyles.card}>
+                    <HardDrive size={14} color="#a78bfa" />
+                    <span style={hwStyles.label}>VRAM</span>
+                    <span style={hwStyles.value}>{vitals?.memory?.used_gb ?? "—"} GB</span>
+                </div>
+                <div style={{ ...hwStyles.card, borderLeft: vitals?.thermal === "Throttled" ? "3px solid #f87171" : "none" }}>
+                    <Thermometer size={14} color={vitals?.thermal === "Throttled" ? "#f87171" : "#fbbf24"} />
+                    <span style={hwStyles.label}>Thermal</span>
+                    <span style={{ ...hwStyles.value, color: vitals?.thermal === "Throttled" ? "#f87171" : "#fff" }}>{vitals?.thermal ?? "Nominal"}</span>
+                </div>
+                <div style={hwStyles.card}>
+                    <Database size={14} color="#10b981" />
+                    <span style={hwStyles.label}>Disk</span>
+                    <span style={hwStyles.value}>{vitals?.disk?.free_gb ?? "—"} GB</span>
+                </div>
+            </div>
+
+            {/* Row 2: Model Expert Status */}
+            <div style={{ display: "flex", gap: "0.75rem", padding: "0 0.25rem" }}>
+                {experts.map(exp => {
+                    const isActive = models?.[exp.id]?.status === "Healthy";
+                    return (
+                        <div key={exp.id} style={{ 
+                            display: "flex", alignItems: "center", gap: "0.4rem", padding: "0.3rem 0.65rem",
+                            borderRadius: "100px", background: isActive ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.03)",
+                            border: `1px solid ${isActive ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.08)"}`,
+                            transition: "all 0.3s ease"
+                        }}>
+                            <exp.Icon size={12} color={isActive ? "#10b981" : "rgba(255,255,255,0.2)"} />
+                            <span style={{ fontSize: "0.6rem", fontWeight: "700", color: isActive ? "#10b981" : "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                {exp.label}
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+const hwStyles = {
+    card: {
+        display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.6rem 0.8rem",
+        background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "10px"
+    },
+    label: { fontSize: "0.65rem", color: "rgba(255,255,255,0.35)", fontWeight: "600", flex: 1 },
+    value: { fontSize: "0.8rem", fontWeight: "800", color: "#fff", fontFamily: "monospace" }
+};
 
 // 1. The Observability Banner Component (Glassmorphism Styled)
 // 1. The Observability Banner Component (GA Hybrid-Cloud)
@@ -87,54 +157,77 @@ const SyncAlertBanner = ({ health, apiError }) => {
 };
 
 export default function BatchStudio() {
-    const [targetFolder, setTargetFolder] = useState("");
+    const { 
+        targetFolder, setTargetFolder,
+        isProcessing, setIsProcessing,
+        results, setResults,
+        error, setError,
+        logs, setLogs,
+        sessionId, setSessionId,
+        isRollingBack, setIsRollingBack
+    } = useBatch();
+
     const [benchmarkFolder, setBenchmarkFolder] = useState("");
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [results, setResults] = useState(null);
-    const [error, setError] = useState(null);
     const [syncHealth, setSyncHealth] = useState(null);
     const [apiError, setApiError] = useState(false);
-    const [logs, setLogs] = useState([]);
-    const [sessionId] = useState(() => `sess_${Math.random().toString(36).substr(2, 9)}`);
-    const [isRollingBack, setIsRollingBack] = useState(false);
+    const [vitals, setVitals] = useState(null);
+    const [cpu, setCpu] = useState(0);
+    const [modelHealth, setModelHealth] = useState({});
+    const [showPostRunLogs, setShowPostRunLogs] = useState(false);
 
-    // Persist benchmark folder from global settings if available
+    // 2. The Telemetry Hook (Hardware Vitals Polling)
     useEffect(() => {
-        const saved = localStorage.getItem("benchmark_dir");
-        if (saved) setBenchmarkFolder(saved);
-        
-        const lastTarget = localStorage.getItem("last_target_dir");
-        if (lastTarget) setTargetFolder(lastTarget);
+        let isMounted = true;
+        const fetchVitals = async () => {
+            try {
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const [telRes, vitRes] = await Promise.all([
+                    fetch(`${baseUrl}/api/admin/telemetry`),
+                    fetch(`${baseUrl}/api/admin/vitals`)
+                ]);
+                
+                if (isMounted) {
+                    if (telRes.ok) {
+                        const telData = await telRes.json();
+                        setCpu(telData.system?.cpu_usage);
+                        setModelHealth(telData.models || {});
+                        setApiError(false);
+                    }
+                    if (vitRes.ok) {
+                        const vitData = await vitRes.json();
+                        setVitals(vitData);
+                    }
+                }
+            } catch (error) {
+                if (isMounted) console.warn("Vitals poll failed.");
+            }
+        };
+
+        fetchVitals();
+        const intervalId = setInterval(fetchVitals, 5000); 
+
+        return () => {
+            isMounted = false;
+            clearInterval(intervalId);
+        };
     }, []);
 
-    // 2. The Telemetry Hook (GA Hybrid-Cloud Polling)
+    // 3. The Sync Health Hook
     useEffect(() => {
         let isMounted = true;
         const fetchSyncHealth = async () => {
             try {
                 const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
                 const response = await fetch(`${baseUrl}/api/health/sync`);
-                if (!response.ok) throw new Error("Health endpoint unreachable");
-                const data = await response.json();
-                
-                if (isMounted) {
+                if (isMounted && response.ok) {
+                    const data = await response.json();
                     setSyncHealth(data);
-                    setApiError(false);
                 }
-            } catch (error) {
-                if (isMounted) {
-                    setApiError(true);
-                }
-            }
+            } catch (error) {}
         };
-
         fetchSyncHealth();
-        const intervalId = setInterval(fetchSyncHealth, 5000); // Tight 5s polling for rendering progress
-
-        return () => {
-            isMounted = false;
-            clearInterval(intervalId);
-        };
+        const id = setInterval(fetchSyncHealth, 10000);
+        return () => { isMounted = false; clearInterval(id); };
     }, []);
 
     const handleFolderPicker = async (setter, key) => {
@@ -203,64 +296,15 @@ export default function BatchStudio() {
     };
 
     const stopBatch = async () => {
+        if (!sessionId) return;
         try {
             const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
             await fetch(`${baseUrl}/api/stop-batch?session_id=${sessionId}`, { method: "POST" });
+            console.log("Stop request sent for session:", sessionId);
         } catch (err) {
-            console.error("Stop request failed", err);
+            console.warn("Stop request failed (backend likely busy):", err);
         }
     };
-
-    // 3. Log Polling Hook (replaces brittle SSE StreamingResponse)
-    // Polls GET /api/logs/{session_id} every 1s while processing.
-    // Uses batch_status metadata (Gemini Extension #3) to manage lifecycle.
-    useEffect(() => {
-        if (!isProcessing) return;
-        let isMounted = true;
-        let linesSeen = 0;
-
-        const poll = async () => {
-            try {
-                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-                const res = await fetch(`${baseUrl}/api/logs/${sessionId}?after=${linesSeen}`);
-                if (!res.ok) return; // Session not registered yet — retry next interval
-                const data = await res.json();
-
-                if (isMounted && data.logs.length > 0) {
-                    setLogs(prev => [...prev, ...data.logs]);
-                    linesSeen = data.total;
-
-                    // Check for rollback events
-                    const hasWarn = data.logs.some(l => l.type === "warn" || l.type === "revert");
-                    if (hasWarn) setIsRollingBack(true);
-
-                    // Check for completion via "done" event
-                    const doneEvent = data.logs.find(l => l.type === "done");
-                    if (doneEvent) {
-                        setResults({ metrics: doneEvent.data, mode: "batch" });
-                        setIsProcessing(false);
-                    }
-                }
-
-                // Gemini Extension #3: Use batch_status for clean lifecycle management
-                if (isMounted && data.batch_status === "completed" && !data.logs.find(l => l.type === "done")) {
-                    // Edge case: status completed but no done event in this delta
-                    setIsProcessing(false);
-                }
-                if (isMounted && data.batch_status === "failed") {
-                    setError("Pipeline failed. Check the terminal output for details.");
-                    setIsProcessing(false);
-                }
-            } catch (err) {
-                // Network error during polling — non-fatal, retry next interval
-                console.warn("Log poll error:", err);
-            }
-        };
-
-        const intervalId = setInterval(poll, 1000); // 1s polling
-        poll(); // Immediate first poll
-        return () => { isMounted = false; clearInterval(intervalId); };
-    }, [isProcessing, sessionId]);
 
     const runScan = async () => {
         if (!targetFolder) {
@@ -275,11 +319,14 @@ export default function BatchStudio() {
 
         try {
             const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            setLogs([{ timestamp: Date.now()/1000, type: "sys", message: "Starting Scan Only mode..." }]);
+            
             const response = await fetch(`${baseUrl}/api/scan`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     target_folder: targetFolder,
+                    session_id: sessionId
                 })
             });
 
@@ -318,6 +365,9 @@ export default function BatchStudio() {
                         AI Photo Culling & Enhancement Engine v2.0
                     </p>
                 </header>
+
+                {/* Real-time Hardware Vitals (Ported from Telemetry) */}
+                <VitalsBar vitals={vitals} cpu={cpu} models={modelHealth} />
 
                 {/* Mount the banner at the very top of the layout */}
                 <SyncAlertBanner health={syncHealth} />
@@ -440,8 +490,47 @@ export default function BatchStudio() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "2rem", animation: "fadeIn 0.5s ease-out" }}>
                         <div style={{ display: "flex", padding: "1rem", background: "rgba(0,255,100,0.1)", border: "1px solid rgba(0,255,100,0.3)", borderRadius: "8px", gap: "1rem", alignItems: "center", color: "#aaffaa" }}>
                             <CheckCircle size={30} /> 
-                            <span style={{ fontSize: "1.2rem", fontWeight: "600" }}>Antigravity Engine v2.1 — Completed in {results.metrics?.processing_time || 0}s</span>
+                            <div style={{ flex: 1 }}>
+                                <span style={{ fontSize: "1.2rem", fontWeight: "600", display: "block" }}>Antigravity Engine v2.1 — Completed in {results.metrics?.processing_time || 0}s</span>
+                                <span style={{ fontSize: "0.8rem", opacity: 0.8 }}>All intelligence signals synchronized.</span>
+                            </div>
+                            <button 
+                                onClick={() => setShowPostRunLogs(!showPostRunLogs)}
+                                style={{ 
+                                    background: "rgba(0,255,100,0.1)", 
+                                    borderColor: "rgba(0,255,100,0.2)", 
+                                    color: "#aaffaa",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.5rem",
+                                    padding: "0.5rem 1rem",
+                                    borderRadius: "6px",
+                                    border: "1px solid",
+                                    cursor: "pointer",
+                                    fontSize: "0.85rem",
+                                    fontWeight: "600",
+                                    transition: "all 0.2s ease"
+                                }}
+                            >
+                                <Terminal size={14} />
+                                {showPostRunLogs ? "Hide Console" : "View Console Logs"}
+                            </button>
                         </div>
+
+                        {showPostRunLogs && (
+                            <div style={{ 
+                                background: "#0a0a0a", border: "1px solid #333", borderRadius: "12px", 
+                                padding: "1rem", height: "300px", overflowY: "auto", 
+                                fontFamily: "'SF Mono', monospace", fontSize: "0.85rem"
+                            }}>
+                                {logs.map((log, i) => (
+                                    <div key={i} style={{ display: "flex", gap: "1rem", padding: "0.2rem 0" }}>
+                                        <span style={{ color: "#444" }}>{new Date(log.timestamp * 1000).toLocaleTimeString()}</span>
+                                        <span style={{ color: log.type === "error" ? "#f87171" : "#888" }}>{log.message}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
 
                         {/* Tier Breakdown Cards */}
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "1rem" }}>

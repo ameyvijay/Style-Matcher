@@ -63,6 +63,11 @@ class Pipeline:
         """
         # Inject abort registry reference into context
         ctx.abort_registry = self._abort_registry
+        
+        # ── Gemini Fix: Clear any stale abort signals for this ID ──
+        # If the user previously aborted a run with this ID, we must
+        # clear it now so the NEW run can actually start.
+        self._abort_registry.discard(ctx.session_id)
 
         # ── Extension Refinement #1: Early log path init ─────────────
         # Create log file BEFORE any stage runs, so even DiscoveryStage
@@ -90,9 +95,20 @@ class Pipeline:
             from main import ensure_memory_headroom
             import asyncio
 
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(ensure_memory_headroom(threshold_pct=80.0))
-            loop.close()
+            # Pipeline runs in a background thread. We MUST get the running 
+            # uvicorn loop from the main thread context, schedule the 
+            # coroutine, and BLOCK until it completes.
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(ensure_memory_headroom(), loop)
+                    # Block for up to 30s to allow memory eviction to finish
+                    future.result(timeout=30)
+                else:
+                    loop.run_until_complete(ensure_memory_headroom())
+            except RuntimeError:
+                # Fallback for environments where get_event_loop() fails (Python 3.12+)
+                asyncio.run(ensure_memory_headroom())
         except ImportError:
             # Graceful degradation if main.py is not importable
             # (e.g., during isolated unit tests)
@@ -104,17 +120,58 @@ class Pipeline:
         try:
             ctx.db = SessionLocal()
 
+            # ── Partition Stages ─────────────────────────────────────
+            # Group stages into Pre-Loop (Global), Per-Group, and Post-Loop (Global).
+            global_pre = []
+            per_group = []
+            global_post = []
+            
+            mode = 0  # 0: global_pre, 1: per_group, 2: global_post
             for stage in self.stages:
-                # 🛑 Check for Abort Request before each stage
+                if stage.is_global:
+                    if mode == 0:
+                        global_pre.append(stage)
+                    else:
+                        mode = 2
+                        global_post.append(stage)
+                else:
+                    mode = 1
+                    per_group.append(stage)
+
+            # 1. Execute Global Pre-flight Stages (e.g., Discovery)
+            for stage in global_pre:
+                if stage.should_skip(ctx): continue
+                for event_str in stage.execute(ctx):
+                    yield self._emit(log_path, event_str)
+
+            # 🛑 Check for Abort after Discovery (stems populated)
+            if ctx.session_id in self._abort_registry:
+                yield from self._rollback_with_log(ctx, log_path)
+                SESSION_REGISTRY[ctx.session_id]["status"] = "failed"
+                return
+
+            # 2. Execute Per-Group Vertical Pipeline
+            # Process each image group completely (Assess -> Enhance -> Tag)
+            # before moving to the next group.
+            for stem_idx, stem in enumerate(ctx.stems, 1):
+                # 🛑 Check for Abort Request before each group
                 if ctx.session_id in self._abort_registry:
                     yield from self._rollback_with_log(ctx, log_path)
                     SESSION_REGISTRY[ctx.session_id]["status"] = "failed"
                     return
 
-                if stage.should_skip(ctx):
-                    continue
+                ctx.current_stem = stem
+                ctx.current_stem_idx = stem_idx
+                # Transient state is reset inside each per_group stage or context
 
-                # Wrap stage execution to persist each yielded event
+                for stage in per_group:
+                    if stage.should_skip(ctx): continue
+                    for event_str in stage.execute(ctx):
+                        yield self._emit(log_path, event_str)
+
+            # 3. Execute Global Post-flight Stages (e.g., CloudSync)
+            for stage in global_post:
+                if stage.should_skip(ctx): continue
                 for event_str in stage.execute(ctx):
                     yield self._emit(log_path, event_str)
 

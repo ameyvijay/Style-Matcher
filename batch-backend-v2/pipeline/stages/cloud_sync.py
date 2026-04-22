@@ -34,7 +34,11 @@ class CloudSyncStage(ProcessingStage):
 
     @property
     def name(self) -> str:
-        return "CloudSync"
+        return "Cloud Sync"
+
+    @property
+    def is_global(self) -> bool:
+        return True
 
     def execute(self, ctx: PipelineContext) -> Generator[str, None, None]:
         # ── Abort guard (final check) ────────────────────────────────

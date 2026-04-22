@@ -20,10 +20,13 @@ export default function SettingsPanel({
   const [availableModels, setAvailableModels] = useState(["gemma4:e4b"]);
 
   useEffect(() => {
+    let controller = new AbortController();
     async function fetchModels() {
       try {
         const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const res = await fetch(`${baseUrl}/api/ollama-tags`);
+        const res = await fetch(`${baseUrl}/api/ollama-tags`, { signal: controller.signal });
+        if (!res.ok) return;
+        
         const data = await res.json();
         if (data.success && data.models.length > 0) {
           setAvailableModels(data.models);
@@ -34,10 +37,12 @@ export default function SettingsPanel({
           }
         }
       } catch (e) {
-        console.error("Failed to fetch Ollama models:", e);
+        if (e.name === 'AbortError') return;
+        console.warn("Ollama unavailable - using default list");
       }
     }
     if (provider === "ollama") fetchModels();
+    return () => controller.abort();
   }, [provider, ollamaModel, setOllamaModel, saveSettings]);
   return (
     <div className="glass-panel" style={{ padding: "2rem" }}>

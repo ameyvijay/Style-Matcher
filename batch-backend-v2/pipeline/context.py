@@ -48,6 +48,7 @@ class PipelineContext:
     clip_embedder: Any = None               # ClipEmbedder instance
     chroma_mgr: Any = None                  # ChromaManager instance
     semantic_rag: Any = None                # SemanticRAG instance
+    vision_analyst: Any = None              # VisionAnalyst instance
 
     # ── Rollback tracking (used by PipelineRunner on abort) ──────────
     session_files: list[str] = field(default_factory=list)
@@ -71,3 +72,6 @@ class PipelineContext:
 
     # ── Reference to abort registry (injected by PipelineRunner) ─────
     abort_registry: Set[str] = field(default_factory=set)
+
+    # ── Stage-crossing accumulator (set by AssessmentStage) ──────────
+    _assessed_groups: list = field(default_factory=list)

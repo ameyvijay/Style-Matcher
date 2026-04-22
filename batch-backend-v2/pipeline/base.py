@@ -52,6 +52,15 @@ class ProcessingStage(ABC):
         """Human-readable stage name for telemetry logging."""
         ...
 
+    @property
+    def is_global(self) -> bool:
+        """
+        Scoping flag:
+        - True: Stage runs once for the entire batch (e.g., Discovery).
+        - False: Stage runs repeatedly for each image group (e.g., Assessment).
+        """
+        return False
+
     @abstractmethod
     def execute(self, ctx: "PipelineContext") -> Generator[str, None, None]:
         """

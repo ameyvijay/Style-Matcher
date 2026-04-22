@@ -205,7 +205,9 @@ class QualityScore:
         """Prepare for JSON storage in table_inferences."""
         d = {
             "sharpness": self.sharpness,
+            "sharp": self.sharpness,        # Double key compatibility
             "aesthetic": self.aesthetic,
+            "aes": self.aesthetic,          # Double key compatibility
             "exposure": self.exposure,
             "vlm_preference": self.semantic_similarity,
             "composite_score": self.composite,
