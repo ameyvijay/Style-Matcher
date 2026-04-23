@@ -17,11 +17,12 @@ class DatasetMetricsService:
         snapshots = self.db.query(DatasetSnapshot).all()
         
         stats = {
-            "golden": 0,
-            "training": 0,
-            "eval": 0,
+            "golden": self.db.query(Media).filter(Media.logical_role == 'golden').count(),
+            "training": self.db.query(DatasetSnapshot).filter(DatasetSnapshot.purpose == 'train').count(),
+            "eval": self.db.query(DatasetSnapshot).filter(DatasetSnapshot.purpose == 'eval').count(),
             "total_annotations": self.db.query(Annotation).count(),
-            "untagged": self.db.query(Media).count() - self.db.query(Annotation).count()
+            # Unreviewed = Images currently in the Firestore swiper queue (or just processed)
+            "untagged": self.db.query(Media).filter(~Media.annotations.any()).count()
         }
 
         for snap in snapshots:

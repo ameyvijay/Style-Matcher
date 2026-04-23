@@ -17,6 +17,7 @@ import subprocess
 from contextlib import asynccontextmanager
 import asyncio
 from datetime import datetime
+import re
 
 from services.prompt_service import PromptService
 from services.rag_automation import RAGAutomationService
@@ -277,7 +278,7 @@ async def flush_test_data(session_id: Optional[str] = None, db: SessionLocal = D
     """Surgically wipe test inferences and skipped annotations to reset for testing."""
     from services.janitor import JanitorService
     janitor = JanitorService()
-    results = janitor.flush_test_data(db, session_id=session_id)
+    results = await janitor.flush_test_data(db, session_id=session_id)
     return {"status": "flush_complete", "details": results}
 
 @app.post("/api/model/compare")
@@ -412,7 +413,7 @@ async def lifespan(app: FastAPI):
     try:
         from services.janitor import JanitorService
         janitor = JanitorService(max_age_days=10)
-        await janitor.run_cleanup()
+        await janitor.run_cleanup(db_session=database.SessionLocal())
         print("🧹 [main] Janitor cleanup complete.")
     except Exception as e:
         print(f"⚠️ [main] Janitor failed (non-fatal): {e}")
@@ -963,6 +964,11 @@ async def batch_process(request: BatchRequest):
         return {"status": "error", "message": f"Folder not found: {request.target_folder}"}
 
     session_id = request.session_id or "default"
+    # Sanitize session_id to prevent path traversal
+    session_id = re.sub(r'[^a-zA-Z0-9_-]', '', session_id)
+    if not session_id:
+        session_id = "default"
+
     t = threading.Thread(
         target=_run_batch_in_background,
         args=(request.target_folder, request.benchmark_folder, session_id),

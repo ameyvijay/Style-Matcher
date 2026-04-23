@@ -86,4 +86,19 @@ All batch processing logic is encapsulated in `pipeline/`. The engine uses a **M
 - **Gemini Model**: Use `gemini-1.5-flash` (do not use v2.5 placeholder).
 - **SQLite Concurrency**: Engine must use `check_same_thread=False` and `PRAGMA journal_mode=WAL` due to background Firestore threads.
 - **Nomenclature**: UI uses `accepted/rejected`, Backend maps to `swipe_right_keeper/swipe_left_cull`.
-- **Rejected Folder**: The `/Rejected` folder logic has been removed; culled files remain untouched in the source directory.
+
+---
+
+## 🛡️ Antigravity Persistent Safety Protocol
+
+1. **Strict Authentication**: No frontend route or component under `app/` (except `/login` or `/landing`) may bypass Firebase Authentication. `AuthGuard` must remain active in all environments, including local development, unless explicitly overridden via a secure, short-lived environment variable.
+2. **Input Sanitization (Zero Trust)**: All inputs used to construct file paths, database queries, or external requests MUST be sanitized. `session_id` must always be strictly validated against an alphanumeric regex.
+3. **Local API Enforcement**: Any internal service communicating with local AI models (e.g., Ollama) must enforce a hardcoded allowlist of acceptable localhost URIs. Client-provided URLs for internal services are strictly forbidden.
+4. **Database Atomicity**: Any operation modifying the state of "Production" or active flags across multiple rows MUST be wrapped in a transaction.
+5. **Memory Limits**: Never fetch unbounded collections from Firestore into memory using `.get()`. Always use `.where()` constraints and `.stream()` for cursor-based pagination.
+
+## 🔍 Code Review Protocol
+
+When performing a code review, always follow the safety protocol above.
+**Action Plan Prompt**:
+"Role: QA Engineer. Analyze these code changes. Did the recent security patches (AuthGuard, SSRF, Path Traversal, Race Conditions) introduce any regressions? Provide a strict PASS/FAIL summary and a detailed action plan for any remediation required."

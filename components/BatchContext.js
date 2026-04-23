@@ -12,7 +12,7 @@ export function BatchProvider({ children }) {
     if (typeof window !== "undefined") {
       const stored = sessionStorage.getItem("ag_session_id");
       if (stored) return stored;
-      const id = `sess_${Math.random().toString(36).substr(2, 9)}`;
+      const id = `sess_${crypto.randomUUID()}`;
       sessionStorage.setItem("ag_session_id", id);
       return id;
     }

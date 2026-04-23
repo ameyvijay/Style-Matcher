@@ -67,7 +67,9 @@ class VisionAnalyst:
             # If explicit prompts provided (from Playground), use them
             if system_prompt and user_prompt_template:
                 final_system = system_prompt
-                final_user = user_prompt_template.format(**ctx)
+                from prompt_registry import SafeFormatter
+                formatter = SafeFormatter()
+                final_user = formatter.format(user_prompt_template, **ctx)
             else:
                 # Fallback to registry (legacy)
                 final_system = "You are an expert photography editor."

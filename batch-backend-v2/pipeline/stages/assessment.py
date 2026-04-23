@@ -142,20 +142,45 @@ class AssessmentStage(ProcessingStage):
 
         # ── Tier Reconciliation ──────────────────────────────────
         max_tier = Tier.CULL
+        max_composite_score = 0.0
         for res in group_results:
             if res["quality"].tier.rank > max_tier.rank:
                 max_tier = res["quality"].tier
+            if res["quality"].composite > max_composite_score:
+                max_composite_score = res["quality"].composite
 
-        # ── Shadow Audit Logic: The 5% Chaos Injection ──────────
+        # ── Stratified Recall Audit: Proximity-Based Sampling ────
+        # Goal: Optimize human-in-the-loop signal by showing 'borderline' failures.
+        # This maximizes the statistical value of the 5% audit budget.
         import random
         is_shadow_audit = False
+        
         if max_tier == Tier.CULL:
-            if random.random() < 0.05: # 5% Audit Rate
-                is_shadow_audit = True
-                # Use 'REJECTED' (visible tag) instead of silent CULL
-                from models import Tier as T
-                max_tier = T.REJECTED 
-                yield yield_log(f"🎲 Shadow Audit: Rescuing {stem} for recall check.", "sys")
+            # DECISION BOUNDARY: 35-40 composite score.
+            # These are 'Informative Samples' where the model is least certain.
+            if 35 <= max_composite_score < 40:
+                if random.random() < 0.50: # High frequency audit for borderline
+                    is_shadow_audit = True
+                    yield yield_log(f"⚖️ Borderline Audit: Testing recall for {stem} (Score: {max_composite_score:.1f})", "sys")
+            
+            # BLACK SWAN CHECK: Obvious technical failures (0-20 score).
+            # We audit these rarely (1%) to catch model logic breakdown.
+            elif max_composite_score < 20:
+                if random.random() < 0.01:
+                    is_shadow_audit = True
+                    yield yield_log(f"🦢 Black Swan Audit: Verifying deep cull for {stem}", "sys")
+            
+            # GENERAL DISTRIBUTION: Standard 5% for the rest of the cull population.
+            else:
+                if random.random() < 0.05:
+                    is_shadow_audit = True
+                    yield yield_log(f"🎲 Distribution Audit: Rescuing {stem} for recall check.", "sys")
+
+        if is_shadow_audit:
+            # Promote to 'REJECTED' (visible but culled) to ensure it appears in UI
+            from models import Tier as T
+            max_tier = T.REJECTED 
+
 
         raw_master = next(
             (res for res in group_results if res["format_type"] == "RAW"),

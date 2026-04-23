@@ -16,6 +16,14 @@ Usage:
 from __future__ import annotations
 
 from typing import Dict, Optional
+import string
+
+class SafeFormatter(string.Formatter):
+    def get_value(self, key, args, kwargs):
+        try:
+            return super().get_value(key, args, kwargs)
+        except KeyError:
+            return f"{{{key}}}"
 
 
 # ─── Versioned Templates ────────────────────────────────────────────
@@ -100,7 +108,8 @@ class PromptRegistry:
             ),
         }
 
-        return template.format(**render_ctx)
+        formatter = SafeFormatter()
+        return formatter.format(template, **render_ctx)
 
     def register_version(self, version: str, template: str) -> None:
         """

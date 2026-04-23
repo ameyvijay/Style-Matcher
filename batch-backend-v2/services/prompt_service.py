@@ -48,19 +48,24 @@ class PromptService:
         return new_prompt
 
     def promote_to_production(self, version_str: str):
-        # Enforce single production prompt
-        self.db.query(PromptVersion).filter(PromptVersion.is_production == True).update({
-            "is_production": False,
-            "status": "retired",
-            "retired_at": datetime.now()
-        })
-        
-        self.db.query(PromptVersion).filter(PromptVersion.version == version_str).update({
-            "is_production": True,
-            "status": "production",
-            "promoted_at": datetime.now()
-        })
-        self.db.commit()
+        # Enforce single production prompt with nested transaction to prevent race conditions
+        try:
+            with self.db.begin_nested():
+                self.db.query(PromptVersion).filter(PromptVersion.is_production == True).update({
+                    "is_production": False,
+                    "status": "retired",
+                    "retired_at": datetime.now()
+                })
+                
+                self.db.query(PromptVersion).filter(PromptVersion.version == version_str).update({
+                    "is_production": True,
+                    "status": "production",
+                    "promoted_at": datetime.now()
+                })
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            raise e
 
     async def run_golden_set_test(self, version_str: str, model_name: str = "moondream") -> Dict:
         async with PROMPT_TEST_LOCK:

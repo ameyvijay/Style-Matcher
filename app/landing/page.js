@@ -344,11 +344,13 @@ function ModelOpsTab() {
   ];
 
   const handleFlush = async () => {
-    if (!confirm("⚠️ DANGER: This will surgically wipe all TEST inferences and skipped annotations. Proceed?")) return;
+    if (!confirm("⚠️ DANGER: This will surgically wipe all local inferences, unreviewed media, and clear all cloud documents. Proceed?")) return;
     try {
       const res = await fetch(`${baseUrl}/api/admin/flush-test-data`, { method: "POST" });
       const data = await res.json();
-      alert(`Flush Complete: ${data.details.inferences_flushed} inferences, ${data.details.skips_cleared} skips cleared.`);
+      const { details } = data;
+      alert(`Flush Complete:\n- ${details.inferences_flushed} inferences wiped\n- ${details.skips_cleared} skips cleared\n- ${details.unreviewed_media_cleared} unreviewed photos removed\n- ${details.firestore_docs_purged} cloud docs purged`);
+      fetchStats(); // Refresh dashboard
     } catch (e) { alert("Flush Failed"); }
   };
 

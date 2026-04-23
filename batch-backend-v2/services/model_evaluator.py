@@ -126,36 +126,46 @@ class ModelEvaluatorService:
         
         start_eval = time.time()
         
-        for idx, m_id in enumerate(media_ids):
-            mem_curr = psutil.virtual_memory().used / (1024 * 1024)
-            report.vram_peak_mb = max(report.vram_peak_mb, mem_curr)
-            
-            if idx == 1: # Capture load delta after first inference
-                report.vram_after_mb = mem_curr
-                report.vram_delta_mb = report.vram_after_mb - report.vram_before_mb
-            
-            if self._get_thermal_state() in ["Serious", "Critical"]:
-                report.thermal_throttle_events += 1
+        sem = asyncio.Semaphore(5) # Allow concurrent evaluation
 
-            media = self.db.query(Media).filter(Media.id == m_id).first()
-            annotation = self.db.query(Annotation).filter(Annotation.media_id == m_id).first()
-            if not media or not annotation: continue
+        async def evaluate_single(idx, m_id):
+            async with sem:
+                mem_curr = psutil.virtual_memory().used / (1024 * 1024)
+                report.vram_peak_mb = max(report.vram_peak_mb, mem_curr)
+                
+                if idx == 1: # Capture load delta after first inference
+                    report.vram_after_mb = mem_curr
+                    report.vram_delta_mb = report.vram_after_mb - report.vram_before_mb
+                
+                if self._get_thermal_state() in ["Serious", "Critical"]:
+                    report.thermal_throttle_events += 1
 
-            start_t = time.time()
-            res = analyst.analyze_image(media.proxy_path or media.file_path)
-            duration_ms = (time.time() - start_t) * 1000
-            
-            # Accuracy Check (Simplified keyword match for MVP)
-            desc = res['description'].lower()
-            decision = "keeper" if any(x in desc for x in ["keep", "great", "excellent", "portfolio"]) else "cull"
-            human = "keeper" if "keeper" in annotation.action else "cull"
-            
-            results.append({
-                "latency": duration_ms,
-                "correct": decision == human,
-                "tokens": len(res['description'].split())
-            })
-            report.images_evaluated += 1
+                media = self.db.query(Media).filter(Media.id == m_id).first()
+                annotation = self.db.query(Annotation).filter(Annotation.media_id == m_id).first()
+                if not media or not annotation: return None
+
+                start_t = time.time()
+                res = await asyncio.to_thread(analyst.analyze_image, media.proxy_path or media.file_path)
+                duration_ms = (time.time() - start_t) * 1000
+                
+                # Accuracy Check (Simplified keyword match for MVP)
+                desc = res['description'].lower()
+                decision = "keeper" if any(x in desc for x in ["keep", "great", "excellent", "portfolio"]) else "cull"
+                human = "keeper" if "keeper" in annotation.action else "cull"
+                
+                report.images_evaluated += 1
+
+                return {
+                    "latency": duration_ms,
+                    "correct": decision == human,
+                    "tokens": len(res['description'].split())
+                }
+
+        tasks = [evaluate_single(idx, m_id) for idx, m_id in enumerate(media_ids)]
+        completed_results = await asyncio.gather(*tasks)
+        for r in completed_results:
+            if r:
+                results.append(r)
 
         report.total_eval_time_sec = time.time() - start_eval
 
