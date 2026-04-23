@@ -9,8 +9,6 @@ from prompt_registry import PromptRegistry, build_prompt_context, LATEST_VERSION
 from models import detect_genre
 
 from vector_store import ChromaManager
-from prompt_registry import PromptRegistry, build_prompt_context, LATEST_VERSION
-from models import detect_genre
 
 class VisionAnalyst:
     """
