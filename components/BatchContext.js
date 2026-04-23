@@ -25,6 +25,33 @@ export function BatchProvider({ children }) {
   // Remove the old useEffect for sessionId initialization
   // since it's now handled by the lazy initializer.
 
+  useEffect(() => {
+    if (isProcessing) return; // Already tracking something
+
+    const checkActiveBatch = async () => {
+      try {
+        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+        const res = await fetch(`${baseUrl}/api/batch/active`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        if (data.active && data.session_id) {
+          console.log("🔗 Found active background session:", data.session_id);
+          setSessionId(data.session_id);
+          setIsProcessing(true);
+          // Don't clear logs, we want to see history of the silent run
+        }
+      } catch (err) {
+        // Silent skip
+      }
+    };
+
+    const intervalId = setInterval(checkActiveBatch, 3000); // Check for background runs every 3s
+    checkActiveBatch();
+    return () => clearInterval(intervalId);
+  }, [isProcessing]);
+
   // Global Log Polling logic
   // This continues even if the user navigates away from the Batch Studio page!
   useEffect(() => {

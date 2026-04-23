@@ -21,6 +21,7 @@ class BatchRequest(BaseModel):
     provider: str = "gemini"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
+    force_reprocess: bool = False
 
 
 # ─── Tier System ─────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ class Tier(str, Enum):
     KEEPER = "keeper"            # Score ≥ 60: Solid shot
     REVIEW = "review"            # Score ≥ 40: Borderline
     CULL = "cull"                # Score < 40: Reject
+    REJECTED = "rejected"        # Explicitly culled but visible in UI
 
     @staticmethod
     def from_score(score: float) -> "Tier":
@@ -45,10 +47,11 @@ class Tier(str, Enum):
     def rank(self) -> int:
         """Numeric rank for comparison (higher is better)."""
         ranks = {
-            Tier.PORTFOLIO: 3,
-            Tier.KEEPER: 2,
-            Tier.REVIEW: 1,
-            Tier.CULL: 0
+            Tier.PORTFOLIO: 4,
+            Tier.KEEPER: 3,
+            Tier.REVIEW: 2,
+            Tier.CULL: 1,
+            Tier.REJECTED: 0
         }
         return ranks.get(self, 0)
 
@@ -169,6 +172,7 @@ TIER_CONFIG = {
     Tier.KEEPER:    {"tag": "Keeper",     "rating": 4, "label": "Select",   "color": "Yellow"},
     Tier.REVIEW:    {"tag": "Review",     "rating": 3, "label": "Second",   "color": "Orange"},
     Tier.CULL:      {"tag": "Cull",       "rating": 1, "label": "Rejected", "color": "Red"},
+    Tier.REJECTED:  {"tag": "Rejected",   "rating": 0, "label": "Trash",    "color": "Gray"},
 }
 
 

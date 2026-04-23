@@ -56,33 +56,108 @@ class DiscoveryStage(ProcessingStage):
         for d in [ctx.enhanced_dir, ctx.rlhf_input_dir, ctx.workspace_dir]:
             os.makedirs(d, exist_ok=True)
 
-        # ── Scan for images ──────────────────────────────────────────
+        # ── Scan for images (Recursive) ──────────────────────────────
         yield yield_log("Scanning filesystem for RAW/JPEG groups...", "sys")
 
         groups: dict[str, list[str]] = {}
-        all_files = sorted(os.listdir(ctx.target_folder))
-        for f in all_files:
-            # 🛑 Check for Abort Request
-            if ctx.session_id in ctx.abort_registry:
-                return
+        
+        # We walk recursively but ignore hidden dirs and our own output folders
+        exclude_dirs = {'.antigravity_workspace', 'Enhanced', 'HiTL', 'RLHF', 'logs', 'vector_store'}
+        
+        for root, dirs, files in os.walk(ctx.target_folder):
+            # Prune hidden dirs and known output directories
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in exclude_dirs]
+            
+            for f in sorted(files):
+                # 🛑 Check for Abort Request
+                if ctx.session_id in ctx.abort_registry:
+                    return
 
-            fpath = os.path.join(ctx.target_folder, f)
-            if os.path.isfile(fpath) and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS:
-                stem = Path(f).stem
-                if stem not in groups:
-                    groups[stem] = []
-                groups[stem].append(f)
+                if os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS:
+                    fpath = os.path.join(root, f)
+                    rel_fpath = os.path.relpath(fpath, ctx.target_folder)
+                    # We use relative path from target_folder as the 'identifier'
+                    # but group by stem for RAW+JPEG pairing
+                    stem = Path(f).stem
+                    if stem not in groups:
+                        groups[stem] = []
+                    
+                    # Store the relative path in the group
+                    groups[stem].append(rel_fpath)
 
         ctx.groups = groups
         ctx.total_files = sum(len(files) for files in groups.values())
-        ctx.stems = sorted(groups.keys())
+        
+        # ── Idempotency Check (Resume Logic) ────────────────────────
+        from models import ImageAssessment, Tier, get_format_type, QualityScore
+        from database import Inference, Media
+        import json
+
+        stems_to_process = []
+        completed_count = 0
+
+        for stem in sorted(groups.keys()):
+            if ctx.force_reprocess:
+                stems_to_process.append(stem)
+                continue
+
+            # Check if all files in this group have a production inference
+            # We look for at least one Inference record linked to one of the group files
+            is_completed = False
+            try:
+                # Find one media in the group
+                sample_file = groups[stem][0]
+                media = ctx.db.query(Media).filter(Media.file_path.like(f"%{sample_file}")).first()
+                if media:
+                    inference = ctx.db.query(Inference).filter(Inference.media_id == media.id).first()
+                    if inference:
+                        is_completed = True
+                        
+                        # Reconstruct ImageAssessment from DB for CloudSyncStage
+                        # We need this to ensure the "Swiper" gets the old data too.
+                        # Note: This is a simplified reconstruction for MVP.
+                        inf_val = json.loads(inference.inference_value) if (inference.inference_value and inference.inference_value.startswith('{')) else {}
+                        
+                        assessment = ImageAssessment(
+                            filename=os.path.basename(media.file_path),
+                            filepath=media.file_path,
+                            format=media.format or get_format_type(media.file_path),
+                            tier=inf_val.get("tier", "review"),
+                            composite_score=inf_val.get("composite_score", 0.0),
+                            sharpness_score=inf_val.get("sharpness", 0.0),
+                            aesthetic_score=inf_val.get("aesthetic", 0.0),
+                            exposure_score=inf_val.get("exposure", 0.0),
+                            reasoning=inf_val.get("semantic_description", ""),
+                            enhanced_path=media.enhanced_path,
+                            rlhf_path=media.proxy_path,
+                            exif=media.file_path, # Temporary placeholder
+                            prompt_version=inference.prompt_version or "v1.0"
+                        )
+                        
+                        # We append directly to _assessed_groups so AssessmentStage skips it,
+                        # but CloudSyncStage sees it.
+                        ctx._assessed_groups.append((stem, [], Tier[assessment.tier.upper()], None))
+                        ctx.assessments.append(assessment)
+                        completed_count += 1
+            except Exception as e:
+                print(f"⚠️ [Discovery] Resume check failed for {stem}: {e}")
+
+            if not is_completed:
+                stems_to_process.append(stem)
+
+        ctx.stems = stems_to_process
+        ctx.completed_stems = [s for s in groups.keys() if s not in stems_to_process]
 
         print(f"📁 Source: {ctx.target_folder}")
-        print(f"🔍 Found {len(ctx.stems)} groups ({ctx.total_files} files) to process.")
-        yield yield_log(
-            f"Found {len(ctx.stems)} groups ({ctx.total_files} files) to process.",
-            "sys",
-        )
+        if completed_count > 0:
+            print(f"♻️  Resuming: {completed_count} groups already processed. {len(ctx.stems)} groups remaining.")
+            yield yield_log(f"Resuming: {completed_count} groups already processed. {len(ctx.stems)} groups remaining.", "sys")
+        else:
+            print(f"🔍 Found {len(ctx.stems)} groups ({ctx.total_files} files) to process.")
+            yield yield_log(
+                f"Found {len(ctx.stems)} groups ({ctx.total_files} files) to process.",
+                "sys",
+            )
 
         # ── Initialize BatchResult ───────────────────────────────────
         ctx.result = BatchResult(total_scanned=ctx.total_files)

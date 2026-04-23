@@ -34,7 +34,9 @@ class PipelineContext:
     # ── Discovery results (set by DiscoveryStage) ────────────────────
     groups: dict[str, list[str]] = field(default_factory=dict)
     stems: list[str] = field(default_factory=list)
+    completed_stems: list[str] = field(default_factory=list) # Already in DB
     total_files: int = 0
+    force_reprocess: bool = False
 
     # ── Database state (managed by PipelineRunner) ───────────────────
     db: Any = None                          # SQLAlchemy Session (SessionLocal)

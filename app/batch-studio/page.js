@@ -446,10 +446,29 @@ export default function BatchStudio() {
 
                 {isProcessing && (
                     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                        <div style={{ 
-                            background: "#0a0a0a", 
-                            border: "1px solid #333", 
-                            borderRadius: "12px", 
+                        {sessionId?.startsWith('silent_') && (
+                            <div style={{
+                                padding: "1rem",
+                                background: "rgba(16, 185, 129, 0.1)",
+                                border: "1px solid rgba(16, 185, 129, 0.3)",
+                                borderRadius: "8px",
+                                color: "#10b981",
+                                fontSize: "0.9rem",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.75rem",
+                                marginBottom: "0.5rem"
+                            }}>
+                                <RotateCcw size={18} className="animate-spin" />
+                                <div>
+                                    <strong style={{ display: "block" }}>Autonomous Background Run Active</strong>
+                                    <span style={{ fontSize: "0.75rem", opacity: 0.8 }}>Kernel is processing files detected by the background watcher. Manual controls are locked.</span>
+                                </div>
+                            </div>
+                        )}
+                        <div style={{
+                            background: "#0a0a0a",
+                            border: "1px solid #333",                            borderRadius: "12px", 
                             padding: "1rem", 
                             height: "400px", 
                             overflowY: "auto", 

@@ -22,16 +22,53 @@ from pipeline.context import PipelineContext
 from database import SessionLocal, Inference, Media
 
 
+import json
+import threading
+
 # ─── Session Registry ────────────────────────────────────────────────
 # Maps session_id → { "log_path": str, "status": str }
 # Used by the GET /api/logs/{session_id} polling endpoint.
 SESSION_REGISTRY: dict[str, dict] = {}
+_REGISTRY_LOCK = threading.Lock()
 
 # Fallback log directory (Gemini Extension Refinement #1):
-# Created at import time, guarantees a writable path even if
-# DiscoveryStage fails before workspace_dir is initialized.
 _FALLBACK_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 os.makedirs(_FALLBACK_LOG_DIR, exist_ok=True)
+_REGISTRY_FILE = os.path.join(_FALLBACK_LOG_DIR, "session_registry.json")
+
+def load_registry():
+    global SESSION_REGISTRY
+    if os.path.exists(_REGISTRY_FILE):
+        try:
+            with open(_REGISTRY_FILE, "r") as f:
+                with _REGISTRY_LOCK:
+                    SESSION_REGISTRY = json.load(f)
+                    # Clean up old running sessions (they died on restart)
+                    for sid in SESSION_REGISTRY:
+                        if SESSION_REGISTRY[sid].get("status") == "running":
+                            SESSION_REGISTRY[sid]["status"] = "failed"
+        except Exception:
+            pass
+
+def save_registry():
+    try:
+        with _REGISTRY_LOCK:
+            with open(_REGISTRY_FILE, "w") as f:
+                json.dump(SESSION_REGISTRY, f)
+    except Exception:
+        pass
+
+def update_session_status(session_id: str, status: str, log_path: str = None):
+    with _REGISTRY_LOCK:
+        if session_id not in SESSION_REGISTRY:
+            SESSION_REGISTRY[session_id] = {}
+        SESSION_REGISTRY[session_id]["status"] = status
+        if log_path:
+            SESSION_REGISTRY[session_id]["log_path"] = log_path
+    save_registry()
+
+# Load immediately on import
+load_registry()
 
 
 # ─── Pipeline Runner ─────────────────────────────────────────────────
@@ -78,10 +115,7 @@ class Pipeline:
             os.unlink(log_path)
 
         # Register session immediately (Gemini Extension #3: batch_status)
-        SESSION_REGISTRY[ctx.session_id] = {
-            "log_path": log_path,
-            "status": "running",
-        }
+        update_session_status(ctx.session_id, "running", log_path)
 
         yield self._emit(log_path, yield_log(
             f"Initializing Antigravity Kernel (Session: {ctx.session_id})", "sys"
@@ -177,7 +211,7 @@ class Pipeline:
 
             # ── All stages completed — no abort ──────────────────────
             # Final "done" event is emitted by CloudSyncStage
-            SESSION_REGISTRY[ctx.session_id]["status"] = "completed"
+            update_session_status(ctx.session_id, "completed")
 
             # Upgrade log path to workspace if it was initialized
             if ctx.workspace_dir:
@@ -191,7 +225,7 @@ class Pipeline:
             yield self._emit(log_path, yield_log(
                 f"CRITICAL KERNEL ERROR: {str(e)}", "error"
             ))
-            SESSION_REGISTRY[ctx.session_id]["status"] = "failed"
+            update_session_status(ctx.session_id, "failed")
             # Rollback DB on critical failure
             if ctx.db:
                 try:
@@ -208,12 +242,6 @@ class Pipeline:
             
             # 🛑 Ensure session is removed from abort registry if it was there
             self._abort_registry.discard(ctx.session_id)
-
-            # Clean up workspace directory
-            shutil.rmtree(
-                os.path.join(ctx.target_folder, ".antigravity_workspace"),
-                ignore_errors=True,
-            )
 
     def _emit(self, log_path: str, log_str: str) -> str:
         """

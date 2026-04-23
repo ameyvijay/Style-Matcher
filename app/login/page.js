@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, googleProvider, signInWithRedirect } from "../../lib/firebase";
-import { onAuthStateChanged, getRedirectResult } from "firebase/auth";
+import { auth, googleProvider } from "../../lib/firebase";
+import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { Sparkles, LogIn } from "lucide-react";
 import { motion } from "framer-motion";
@@ -11,10 +11,25 @@ import styles from "./login.module.css";
 export default function LoginPage() {
   const router = useRouter();
 
-  const handleLogin = () => {
-    // Muted authentication for local testing
-    router.push("/cull");
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error("Login failed:", error);
+      if (error.code === 'auth/unauthorized-domain') {
+        alert("This domain is not authorized in Firebase Console. Please add 'localhost' to Authorized Domains.");
+      }
+    }
   };
+
+  useEffect(() => {
+    const checkUser = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        router.push("/dashboard");
+      }
+    });
+    return () => checkUser();
+  }, [router]);
 
   return (
     <main className={styles.main}>
@@ -48,6 +63,24 @@ export default function LoginPage() {
           <LogIn size={20} />
           Continue with Google
         </button>
+
+        {process.env.NODE_ENV === 'development' && (
+          <button 
+            onClick={() => router.push("/cull")}
+            style={{ 
+              marginTop: '1rem', 
+              background: 'transparent', 
+              border: '1px dashed rgba(255,255,255,0.2)', 
+              color: 'rgba(255,255,255,0.5)',
+              padding: '0.5rem 1rem',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              cursor: 'pointer'
+            }}
+          >
+            🚧 Dev Bypass (Local Only)
+          </button>
+        )}
 
         <p className={styles.footerText}>
           Powered by Antigravity v2.1

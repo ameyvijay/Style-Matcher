@@ -98,6 +98,20 @@ async def promote_media(request: GovernancePromotion):
     finally:
         db.close()
 
+
+class NotificationRegister(BaseModel):
+    token: str
+    topic: str = "all_users"
+
+@app.post("/api/notifications/register")
+async def register_notification(request: NotificationRegister):
+    """Register an FCM token and subscribe it to a topic."""
+    bridge = firebase_bridge.get_bridge()
+    success = bridge.subscribe_to_topic([request.token], request.topic)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to subscribe to topic")
+    return {"status": "success", "token": request.token, "topic": request.topic}
+
 @app.post("/api/governance/register-remote")
 async def register_remote_media(request: NASMediaRegister):
     """
@@ -431,8 +445,24 @@ async def lifespan(app: FastAPI):
 # Lifespan handled via app.set_lifespan (modern FastAPI) or just defined here
 app.router.lifespan_context = lifespan
 
+from fastapi.responses import FileResponse
+
+@app.get("/api/media")
+async def get_media_proxy(path: str):
+    """
+    Proxy local absolute paths for the Swiper UI.
+    Bypasses StaticFiles project-root restrictions.
+    """
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Optional: Add security check to ensure path is within allowed volumes
+    # if not any(path.startswith(v) for v in ["/Users", "/Volumes"]):
+    #     raise HTTPException(status_code=403, detail="Path outside allowed volumes")
+
+    return FileResponse(path)
+
 # Mount static media folders
-# /rlhf-media points to the project root directory
 project_root = os.path.dirname(os.path.dirname(__file__))
 app.mount("/rlhf-media", StaticFiles(directory=project_root), name="rlhf-media")
 
@@ -620,6 +650,22 @@ async def update_source_root(payload: SourceRootConfig):
     
     # Also update current environment for immediately subsequent requests
     os.environ["SOURCE_ROOT"] = payload.source_root
+
+    # Step E: Trigger Background Watcher (restart if needed)
+    try:
+        # Check if already running and kill existing one
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            if proc.info['cmdline'] and 'background_watcher.py' in proc.info['cmdline']:
+                proc.terminate()
+        
+        watcher_path = os.path.join(os.path.dirname(__file__), "background_watcher.py")
+        env = os.environ.copy()
+        env["SOURCE_ROOT"] = payload.source_root
+        subprocess.Popen(["python3", watcher_path], env=env)
+        print(f"📡 [main] Background Watcher triggered for: {payload.source_root}")
+    except Exception as e:
+        print(f"⚠️ [main] Watcher trigger failed: {e}")
+
     return {"status": "success", "source_root": payload.source_root}
 
 @app.get("/api/config/source-root")
@@ -870,6 +916,16 @@ async def stop_batch(session_id: str = "default"):
     return {"status": "stop_requested", "session_id": session_id}
 
 
+@app.get("/api/batch/active")
+async def get_active_batch():
+    """Return the ID of the currently running session, if any."""
+    from pipeline.pipeline_runner import SESSION_REGISTRY
+    for session_id, data in SESSION_REGISTRY.items():
+        if data.get("status") == "running":
+            return {"active": True, "session_id": session_id}
+    return {"active": False}
+
+
 # ─── Log Polling (SSE Replacement) ─────────────────────────────────
 @app.get("/api/logs/{session_id}")
 async def get_session_logs(session_id: str, after: int = 0):
@@ -940,16 +996,15 @@ async def batch_process_stream(
 
 
 # ─── Batch Processing (Background Thread + Polling) ────────────────
-def _run_batch_in_background(target_folder: str, benchmark_folder: str, session_id: str):
+def _run_batch_in_background(target_folder: str, benchmark_folder: str, session_id: str, force_reprocess: bool = False):
     """Run the pipeline in a background thread, draining the generator to persist logs."""
     try:
-        for _ in batch_orchestrator.stream_batch(target_folder, benchmark_folder, session_id):
+        for _ in batch_orchestrator.stream_batch(target_folder, benchmark_folder, session_id, force_reprocess=force_reprocess):
             pass  # _emit() inside PipelineRunner writes each event to logs.jsonl
     except Exception as e:
         print(f"❌ [Background Batch] Error: {e}")
-        from pipeline.pipeline_runner import SESSION_REGISTRY
-        if session_id in SESSION_REGISTRY:
-            SESSION_REGISTRY[session_id]["status"] = "failed"
+        from pipeline.pipeline_runner import update_session_status
+        update_session_status(session_id, "failed")
 
 
 @app.post("/api/batch-process")
@@ -971,7 +1026,7 @@ async def batch_process(request: BatchRequest):
 
     t = threading.Thread(
         target=_run_batch_in_background,
-        args=(request.target_folder, request.benchmark_folder, session_id),
+        args=(request.target_folder, request.benchmark_folder, session_id, request.force_reprocess),
         daemon=True,
     )
     t.start()

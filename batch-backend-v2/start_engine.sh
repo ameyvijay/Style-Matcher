@@ -25,13 +25,14 @@ source .venv/bin/activate
 export PYTHONUNBUFFERED=1
 
 # 4. Launch Backend API (Control Plane Bridge)
-echo "🚀 Booting FastAPI Gateway..."
-nohup python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload > backend.log 2>&1 &
+echo "🚀 Booting FastAPI Gateway (Stay Awake Enabled)..."
+# -i prevents system idle sleep, -s prevents system sleep, -d prevents display sleep
+nohup caffeinate -isd python3 -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload > backend.log 2>&1 &
 BACKEND_PID=$!
 
 # 5. Launch Cloud Worker (GPS fulfilment)
 echo "📡 Initializing Firestore Pull Listener..."
-nohup python3 sync_watchdog.py > sync_watchdog.out.log 2>&1 &
+nohup caffeinate -is python3 sync_watchdog.py > sync_watchdog.out.log 2>&1 &
 WORKER_PID=$!
 
 # 6. Terminal Dashboard

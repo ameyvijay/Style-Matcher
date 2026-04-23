@@ -1,5 +1,6 @@
 import VersionBadge from "../components/VersionBadge";
 import Navigation from "../components/Navigation";
+import NotificationManager from "../components/NotificationManager";
 import { BatchProvider } from "../components/BatchContext";
 import "./globals.css";
 
@@ -35,6 +36,7 @@ export default function RootLayout({ children }) {
           <div className="blob blob-2"></div>
         </div>
         <BatchProvider>
+          <NotificationManager />
           <Navigation />
           {children}
           <VersionBadge />

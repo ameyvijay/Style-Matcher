@@ -103,9 +103,15 @@ class EnhancementStage(ProcessingStage):
                 rlhf_path = ""
                 recovery_notes = _build_recovery_notes(quality, exif)
 
-                if max_tier == Tier.CULL:
-                    ctx.result.culled += 1
-                    ctx.tier_buckets["culled"] += 1
+                if max_tier in [Tier.CULL, Tier.REJECTED]:
+                    if max_tier == Tier.CULL:
+                        ctx.result.culled += 1
+                        ctx.tier_buckets["culled"] += 1
+                    else:
+                        # REJECTED counts as culled for stats but stays visible
+                        ctx.result.culled += 1
+                        ctx.tier_buckets["culled"] += 1
+                        
                     if quality.recovery_potential in ("high", "medium"):
                         ctx.result.recoverable += 1
                         ctx.tier_buckets["recoverable"] += 1

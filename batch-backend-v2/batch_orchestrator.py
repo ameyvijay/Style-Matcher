@@ -51,7 +51,8 @@ def stream_batch(
     target_folder: str,
     benchmark_folder: str | None = None,
     session_id: str = "default",
-    priority: str = "foreground"
+    priority: str = "foreground",
+    force_reprocess: bool = False
 ) -> Generator[str, None, None]:
     """
     Executes the full 8-stage pipeline and yields real-time progress events.
@@ -74,6 +75,7 @@ def stream_batch(
         session_id=session_id,
     )
     ctx.priority = priority # Inject priority into context for stages to consume
+    ctx.force_reprocess = force_reprocess
     yield from pipeline.run(ctx)
 
 def process_background_queue():
@@ -84,7 +86,26 @@ def process_background_queue():
     import os
     import json
     queue_file = os.path.join(os.path.dirname(__file__), "batch_queue.json")
-    
+
+    # 🔄 [Resilience] Reset stuck 'processing' tasks to 'pending' on startup
+    if os.path.exists(queue_file):
+        try:
+            with open(queue_file, "r") as f:
+                queue = json.load(f)
+
+            needs_save = False
+            for item in queue:
+                if item.get('status') == 'processing':
+                    print(f"🔄 [Background] Resetting stale task: {item.get('folder')}")
+                    item['status'] = 'pending'
+                    needs_save = True
+
+            if needs_save:
+                with open(queue_file, "w") as f:
+                    json.dump(queue, f, indent=4)
+        except Exception as e:
+            print(f"⚠️ [Background] Startup queue reset failed: {e}")
+
     while True:
         if not os.path.exists(queue_file):
             time.sleep(10)
@@ -119,6 +140,18 @@ def process_background_queue():
             ):
                 pass
             task['status'] = 'completed'
+
+            # 🔔 Notify via Firebase
+            try:
+                from firebase_bridge import get_bridge
+                bridge = get_bridge()
+                bridge.send_push_notification(
+                    title="Batch Complete",
+                    body=f"Background processing for '{os.path.basename(task['folder'])}' is finished.",
+                    data={"type": "batch_done", "folder": task['folder']}
+                )
+            except:
+                pass
         except Exception as e:
             print(f"❌ [Background] Failed: {e}")
             task['status'] = 'failed'

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, Callable, Dict, Any
 
 import firebase_admin
-from firebase_admin import firestore, storage
+from firebase_admin import firestore, storage, messaging
 from firebase_init import initialize_firebase
 from google.cloud.firestore_v1.watch import Watch
 
@@ -66,6 +66,45 @@ class FirebaseBridge:
             return True
         except Exception as e:
             print(f"[firebase_bridge] Initialization failed: {e}")
+            return False
+
+    def send_push_notification(self, title: str, body: str, data: Dict[str, str] = None) -> bool:
+        """
+        Sends a broadcast push notification to the 'all_users' topic.
+        Used for batch completion and new folder detection alerts.
+        """
+        if not self.initialize():
+            return False
+
+        try:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                data=data or {},
+                topic='all_users',
+            )
+            response = messaging.send(message)
+            print(f"🔔 [FCM] Notification sent: {response}")
+            return True
+        except Exception as e:
+            print(f"⚠️ [FCM] Failed to send notification: {e}")
+            return False
+
+    def subscribe_to_topic(self, tokens: list[str], topic: str) -> bool:
+        """
+        Subscribes a list of tokens to a specific FCM topic.
+        """
+        if not self.initialize():
+            return False
+
+        try:
+            response = messaging.subscribe_to_topic(tokens, topic)
+            print(f"✅ [FCM] Subscribed {response.success_count} tokens to topic: {topic}")
+            return True
+        except Exception as e:
+            print(f"⚠️ [FCM] Topic subscription failed: {e}")
             return False
 
     # ─── Data Injection ──────────────────────────────────────────────────

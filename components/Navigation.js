@@ -3,12 +3,14 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Lock, Unlock, Image, Camera, Activity, Settings, LayoutDashboard, CheckCircle } from "lucide-react";
+import { Menu, X, Lock, Unlock, Image, Camera, Activity, Settings, LayoutDashboard, CheckCircle, Cpu } from "lucide-react";
+import { useBatch } from "./BatchContext";
 
 export default function Navigation() {
   const [isOpen, setIsOpen] = useState(false);
   const [isLocal, setIsLocal] = useState(false);
   const [engineOnline, setEngineOnline] = useState(false);
+  const { isProcessing } = useBatch();
 
   const checkEngine = async () => {
     try {
@@ -68,7 +70,7 @@ export default function Navigation() {
           zIndex: 9999,
           background: "rgba(0,0,0,0.7)",
           backdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,255,255,0.15)",
+          border: isProcessing ? "1px solid rgba(16,185,129,0.5)" : "1px solid rgba(255,255,255,0.15)",
           borderRadius: "16px",
           width: "48px",
           height: "48px",
@@ -76,11 +78,11 @@ export default function Navigation() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "white",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)"
+          color: isProcessing ? "#10b981" : "white",
+          boxShadow: isProcessing ? "0 0 20px rgba(16,185,129,0.2)" : "0 8px 32px rgba(0,0,0,0.4)"
         }}
       >
-        {isOpen ? <X size={22} /> : <Menu size={22} />}
+        {isOpen ? <X size={22} /> : (isProcessing ? <Cpu size={22} className="animate-pulse" /> : <Menu size={22} />)}
       </motion.button>
 
       <motion.div 

@@ -1,4 +1,5 @@
 import json
+import os
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import Media, Annotation, DatasetSnapshot, ModelRegistry, Inference
@@ -106,11 +107,30 @@ class DatasetMetricsService:
                 "status": status
             }
 
+        # 4. Background Queue Status
+        queue_status = {"status": "Idle", "pending": 0, "current": None}
+        try:
+            queue_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "batch_queue.json")
+            if os.path.exists(queue_file):
+                with open(queue_file, "r") as f:
+                    queue = json.load(f)
+                    pending = [q for q in queue if q['status'] == 'pending']
+                    active = [q for q in queue if q['status'] == 'processing']
+                    queue_status["pending"] = len(pending)
+                    if active:
+                        queue_status["status"] = "Active"
+                        queue_status["current"] = os.path.basename(active[0]['folder'])
+                    elif pending:
+                        queue_status["status"] = "Waiting"
+        except Exception as e:
+            print(f"⚠️ Telemetry: Queue check failed: {e}")
+
         return {
             "system": {
                 "cpu_usage": psutil.cpu_percent(),
                 "memory_usage": psutil.virtual_memory().percent,
-                "mps_available": torch.backends.mps.is_available()
+                "mps_available": torch.backends.mps.is_available(),
+                "queue": queue_status
             },
             "models": model_health
         }

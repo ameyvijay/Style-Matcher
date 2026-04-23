@@ -642,9 +642,14 @@ function TelemetryTab() {
           <span style={styles.hwValue}>{telemetry.system?.cpu_usage ?? "—"}%</span>
         </div>
         <div style={styles.hwCard}>
-          <HardDrive size={14} color="#a78bfa" />
-          <span style={styles.hwLabel}>VRAM</span>
-          <span style={styles.hwValue}>{vitals?.memory?.used_gb ?? "—"} / {vitals?.memory?.total_gb ?? "—"} GB</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <ScanLine size={14} color={telemetry.system?.queue?.status === "Active" ? "#10b981" : "#a78bfa"} />
+            <span style={styles.hwLabel}>Watcher</span>
+          </div>
+          <span style={{ ...styles.hwValue, fontSize: "0.75rem", color: telemetry.system?.queue?.status === "Active" ? "#10b981" : "#fff" }}>
+            {telemetry.system?.queue?.status === "Active" ? `Processing: ${telemetry.system?.queue?.current}` : telemetry.system?.queue?.status}
+            {telemetry.system?.queue?.pending > 0 && ` (${telemetry.system?.queue?.pending} pending)`}
+          </span>
         </div>
         <div style={styles.hwCard}>
           <Thermometer size={14} color={vitals?.thermal === "Throttled" ? "#f87171" : "#fbbf24"} />
