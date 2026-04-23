@@ -63,9 +63,14 @@ class DatasetMetricsService:
         # Limit to 50 for better coverage of recent multi-file batches
         recent_inferences = self.db.query(Inference).order_by(Inference.created_at.desc()).limit(50).all()
         
-        # 3. Map signals to expert keys
-        for m in models:
-            m_name = m.name
+        # 3. Map signals to expert keys (Always return core 4 for UI stability)
+        core_models = ["laplacian_v2", "nima_v1", "clip_vit_b32", "ollama_vlm"]
+        
+        # Build model map from DB for easy lookup
+        db_model_map = {m.name: m for m in models}
+
+        for m_name in core_models:
+            m = db_model_map.get(m_name)
             
             # Default state
             avg_conf = 0.0
@@ -73,18 +78,15 @@ class DatasetMetricsService:
             
             if m_name == "laplacian_v2":
                 # Check for "sharpness" or "sharp"
-                avg_conf = self.db.query(func.avg(Inference.confidence)).filter(Inference.model_id == m.id).scalar() or 0.0
+                if m:
+                    avg_conf = self.db.query(func.avg(Inference.confidence)).filter(Inference.model_id == m.id).scalar() or 0.0
                 has_signal = any(key in (inf.inference_value or "") for inf in recent_inferences for key in ["sharpness", "sharp"])
                 status = "Healthy" if (has_signal or any_active) else "Inactive"
             
             elif m_name == "nima_v1":
-                # Broaden check: if ANY inference in the DB has aesthetic/aes signals, it's Healthy
-                # OR if a run is currently active.
                 has_aes = any(key in (inf.inference_value or "") for inf in recent_inferences for key in ["aesthetic", "aes"])
                 if not has_aes:
-                    # Deep check as fallback
                     has_aes = self.db.query(Inference).filter(Inference.inference_value.contains("aes")).first() is not None
-                
                 status = "Healthy" if (has_aes or any_active) else "Inactive"
                 avg_conf = 0.95 if (has_aes or any_active) else 0.0
                 
@@ -94,7 +96,6 @@ class DatasetMetricsService:
                 avg_conf = 1.0 if (has_emb or any_active) else 0.0
                 
             elif m_name == "ollama_vlm":
-                # Check for "semantic_description" or "description"
                 has_desc = any(key in (inf.inference_value or "") for inf in recent_inferences for key in ["semantic_description", "description"])
                 status = "Healthy" if (has_desc or any_active) else "Inactive"
                 avg_conf = 0.88 if (has_desc or any_active) else 0.0

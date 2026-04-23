@@ -83,7 +83,8 @@ const SyncAlertBanner = ({ health, apiError }) => {
     // DISCONNECTED STATE: Red / High Urgency
     if (apiError || (health && health.status === "disconnected")) {
         const isNetworkError = apiError;
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
 
         return (
             <div style={{ 
@@ -157,7 +158,7 @@ const SyncAlertBanner = ({ health, apiError }) => {
 };
 
 export default function BatchStudio() {
-    const { 
+    const {
         targetFolder, setTargetFolder,
         isProcessing, setIsProcessing,
         results, setResults,
@@ -167,9 +168,36 @@ export default function BatchStudio() {
         isRollingBack, setIsRollingBack
     } = useBatch();
 
-    const [benchmarkFolder, setBenchmarkFolder] = useState("");
-    const [syncHealth, setSyncHealth] = useState(null);
-    const [apiError, setApiError] = useState(false);
+    // ── NEXUS: Sync Target Folder with Backend Source Root ────────
+    useEffect(() => {
+        const fetchSourceRoot = async () => {
+            try {
+                const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+                const res = await fetch(`${baseUrl}/api/config/source-root`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.source_root) setTargetFolder(data.source_root);
+                }
+            } catch (e) {}
+        };
+        fetchSourceRoot();
+    }, []);
+
+    const updateSourceRoot = async (path) => {
+        setTargetFolder(path);
+        try {
+            const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+            await fetch(`${baseUrl}/api/config/source-root`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ source_root: path })
+            });
+        } catch (e) {}
+    };
+
+    const [syncHealth, setSyncHealth] = useState(null);    const [apiError, setApiError] = useState(false);
     const [vitals, setVitals] = useState(null);
     const [cpu, setCpu] = useState(0);
     const [modelHealth, setModelHealth] = useState({});
@@ -180,7 +208,8 @@ export default function BatchStudio() {
         let isMounted = true;
         const fetchVitals = async () => {
             try {
-                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`;
                 const [telRes, vitRes] = await Promise.all([
                     fetch(`${baseUrl}/api/admin/telemetry`),
                     fetch(`${baseUrl}/api/admin/vitals`)
@@ -217,7 +246,8 @@ export default function BatchStudio() {
         let isMounted = true;
         const fetchSyncHealth = async () => {
             try {
-                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`;
                 const response = await fetch(`${baseUrl}/api/health/sync`);
                 if (isMounted && response.ok) {
                     const data = await response.json();
@@ -232,7 +262,8 @@ export default function BatchStudio() {
 
     const handleFolderPicker = async (setter, key) => {
         try {
-            const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+            const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`;
             const res = await fetch(`${baseUrl}/api/pick-folder`);
             if (!res.ok) {
                 const errData = await res.json();
@@ -261,7 +292,8 @@ export default function BatchStudio() {
         localStorage.setItem("last_target_dir", targetFolder);
 
         try {
-            const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+            const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`;
             const url = `${baseUrl}/api/batch-process`;
             
             // Immediate feedback
@@ -272,7 +304,6 @@ export default function BatchStudio() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
                     target_folder: targetFolder, 
-                    benchmark_folder: benchmarkFolder, 
                     session_id: sessionId 
                 })
             });
@@ -298,7 +329,8 @@ export default function BatchStudio() {
     const stopBatch = async () => {
         if (!sessionId) return;
         try {
-            const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
             await fetch(`${baseUrl}/api/stop-batch?session_id=${sessionId}`, { method: "POST" });
             console.log("Stop request sent for session:", sessionId);
         } catch (err) {
@@ -318,7 +350,8 @@ export default function BatchStudio() {
         localStorage.setItem("last_target_dir", targetFolder);
 
         try {
-            const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
             setLogs([{ timestamp: Date.now()/1000, type: "sys", message: "Starting Scan Only mode..." }]);
             
             const response = await fetch(`${baseUrl}/api/scan`, {
@@ -380,17 +413,17 @@ export default function BatchStudio() {
 
                 <div className="input-group" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                     <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: "600" }}>
-                        <Folder size={18} /> Target Directory Path (Absolute)
+                        <Folder size={18} /> Source Library Root (Local or NAS)
                     </label>
                     <div style={{ display: "flex", gap: "1rem" }}>
                         <input 
                             type="text" 
                             className="input-field"
-                            placeholder="Example: /Users/shivamagent/Desktop/MyPhotos"
+                            placeholder="Example: /Users/shivamagent/Pictures/MyLibrary"
                             value={targetFolder}
-                            onChange={(e) => setTargetFolder(e.target.value)}
+                            onChange={(e) => updateSourceRoot(e.target.value)}
                             onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => onDrop(e, setTargetFolder)}
+                            onDrop={(e) => onDrop(e, updateSourceRoot)}
                             style={{ flex: 1 }}
                             disabled={isProcessing}
                         />

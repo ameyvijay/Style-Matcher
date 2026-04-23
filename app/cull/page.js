@@ -184,7 +184,8 @@ export default function CullPage() {
 
       try {
         if (status === "skipped") {
-            const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+            const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
             await fetch(`${baseUrl}/api/annotations/skip`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -222,7 +223,8 @@ export default function CullPage() {
   const finalizeBatch = async () => {
     setIsFinalizing(true);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
       const res = await fetch(`${baseUrl}/api/session/close`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

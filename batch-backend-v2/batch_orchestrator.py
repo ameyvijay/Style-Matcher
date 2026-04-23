@@ -50,13 +50,12 @@ ABORT_REGISTRY: Set[str] = set()
 def stream_batch(
     target_folder: str,
     benchmark_folder: str | None = None,
-    session_id: str = "default"
+    session_id: str = "default",
+    priority: str = "foreground"
 ) -> Generator[str, None, None]:
     """
     Executes the full 8-stage pipeline and yields real-time progress events.
-    Supports atomic rollback if aborted via ABORT_REGISTRY.
-
-    This is now a thin delegate to Pipeline.run() with 6 modular stages.
+    priority: 'foreground' (full speed) or 'background' (throttled).
     """
     pipeline = Pipeline(
         stages=[
@@ -74,7 +73,61 @@ def stream_batch(
         benchmark_folder=benchmark_folder,
         session_id=session_id,
     )
+    ctx.priority = priority # Inject priority into context for stages to consume
     yield from pipeline.run(ctx)
+
+def process_background_queue():
+    """
+    Background worker that drains 'batch_queue.json' silently.
+    Called by main.py lifespan.
+    """
+    import os
+    import json
+    queue_file = os.path.join(os.path.dirname(__file__), "batch_queue.json")
+    
+    while True:
+        if not os.path.exists(queue_file):
+            time.sleep(10)
+            continue
+            
+        try:
+            with open(queue_file, "r") as f:
+                queue = json.load(f)
+        except:
+            time.sleep(10)
+            continue
+            
+        pending = [item for item in queue if item['status'] == 'pending']
+        if not pending:
+            time.sleep(10)
+            continue
+            
+        # Process the oldest item
+        task = pending[0]
+        task['status'] = 'processing'
+        with open(queue_file, "w") as f:
+            json.dump(queue, f, indent=4)
+            
+        print(f"🤖 [Background] Starting silent batch: {task['folder']}")
+        
+        # Drain the generator silently
+        try:
+            for _ in stream_batch(
+                target_folder=task['folder'],
+                session_id=f"silent_{int(time.time())}",
+                priority="background"
+            ):
+                pass
+            task['status'] = 'completed'
+        except Exception as e:
+            print(f"❌ [Background] Failed: {e}")
+            task['status'] = 'failed'
+            task['error'] = str(e)
+            
+        with open(queue_file, "w") as f:
+            json.dump(queue, f, indent=4)
+        
+        time.sleep(5) # Cooldown between batches
 
 
 # ─── Scan Only (Read-Only) — Gemini Refinement #3 ──────────────────

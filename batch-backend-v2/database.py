@@ -41,6 +41,13 @@ class Media(Base):
     id = Column(Integer, primary_key=True, index=True)
     photo_hash = Column(String(64), unique=True, index=True, nullable=False)
     file_path = Column(Text, nullable=False)           # Absolute path to the immutable read-only original
+    source_node = Column(String(100), default="local_m4") # For Tailscale/NAS future-proofing
+    
+    # Logical Role (Partitioning)
+    # 'rag', 'golden', 'benchmark', 'audit_shadow'
+    logical_role = Column(String(50), default='rag', index=True)
+    is_manual_entry = Column(Boolean, default=False)
+    
     proxy_path = Column(Text, nullable=True)           # Path to lightweight extracted JPEG for models to use
     enhanced_path = Column(Text, nullable=True)        # Path to AI Enhanced version (ESRGAN/Color bumped)
     file_size = Column(Integer, nullable=True)
@@ -188,13 +195,18 @@ class Annotation(Base):
 
 class DatasetSnapshot(Base):
     """
-    Immunitable dataset snapshots for training and evaluations.
+    Immutable dataset snapshots for training and evaluations.
     """
     __tablename__ = 'table_dataset_snapshots'
 
     id = Column(Integer, primary_key=True, index=True)
     snapshot_version = Column(String(50), unique=True, nullable=False) # e.g. "dataset_v1.0"
     purpose = Column(String(20), nullable=False)                      # 'train', 'eval', 'test_golden'
+    
+    # Lineage Metadata
+    parent_snapshot_id = Column(Integer, ForeignKey('table_dataset_snapshots.id'), nullable=True)
+    model_id = Column(Integer, ForeignKey('table_models.id'), nullable=True)
+    prompt_version = Column(String(50), ForeignKey('table_prompt_versions.version'), nullable=True)
     
     # JSON list of media_ids locked in this snapshot. 
     # Use JSON to prevent needing a massive associative table for millions of photos.

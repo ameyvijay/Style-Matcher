@@ -42,9 +42,11 @@ from models import BatchRequest, BatchResult
 class SessionClosePayload(BaseModel):
     accepted_file_paths: List[str]
 
-class DecisionReversal(BaseModel):
-    photo_hash: str
-    user_id: str = "guest"
+import batch_orchestrator
+import firebase_bridge
+from database import SessionLocal, Media, Inference, Annotation, ModelRegistry, SyncQueue, get_db
+from services.mlops_metrics import DatasetMetricsService
+from services.recommendation_engine import RecommendationEngine
 
 class PromptCreate(BaseModel):
     version: str
@@ -57,17 +59,69 @@ class PromptCreate(BaseModel):
 class BootstrapRequest(BaseModel):
     limit: int = 50
 
-import batch_orchestrator
-import firebase_bridge
-from database import SessionLocal, Media, Inference, Annotation, ModelRegistry, SyncQueue, get_db
-from services.mlops_metrics import DatasetMetricsService
-from services.recommendation_engine import RecommendationEngine
-
 app = FastAPI(
     title="Antigravity Engine",
     version="2.1.0",
     description="AI Photography Culling & Enhancement Engine",
 )
+
+# Allow Next.js PWA (running on Vercel or locally) to hit the Ngrok tunnel
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+from services.governance_service import GovernanceService
+
+class GovernancePromotion(BaseModel):
+    photo_hash: str
+    role: str  # 'golden', 'benchmark', 'rag'
+    is_manual: bool = True
+
+class NASMediaRegister(BaseModel):
+    file_path: str
+    source_node: str # e.g., "NAS_TAILSCALE_01"
+
+@app.post("/api/governance/promote")
+async def promote_media(request: GovernancePromotion):
+    db = SessionLocal()
+    gov = GovernanceService(db)
+    try:
+        result = gov.promote_to_role(request.photo_hash, request.role, request.is_manual)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+@app.post("/api/governance/register-remote")
+async def register_remote_media(request: NASMediaRegister):
+    """
+    Endpoint for NAS/Tailscale systems to 'announce' new media to the engine.
+    The engine will hash it and track its location on the remote node.
+    """
+    db = SessionLocal()
+    gov = GovernanceService(db)
+    try:
+        # Note: In a real remote setup, the remote node would hash and send metadata.
+        # For now, we assume path is reachable via Tailscale mount.
+        media = gov.register_media(request.file_path, request.source_node)
+        return {"status": "registered", "media_id": media.id, "hash": media.photo_hash}
+    finally:
+        db.close()
+
+@app.get("/api/governance/lineage/{photo_hash}")
+async def get_photo_lineage(photo_hash: str):
+    db = SessionLocal()
+    gov = GovernanceService(db)
+    lineage = gov.get_lineage(photo_hash)
+    db.close()
+    if not lineage:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return lineage
 
 # ─── Admin & MLOps Endpoints ──────────────────────────────────────
 @app.get("/api/admin/dataset-stats")
@@ -317,10 +371,20 @@ async def ensure_memory_headroom(threshold_pct: float = None):
 
 # ─── Startup / Shutdown ──────────────────────────────────────────────
 from firebase_init import initialize_firebase
+import database
+import seed_models
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run self-tests and initialize cloud telemetry on startup."""
+    # 0. Initialize Database & Seed Models
+    try:
+        database.init_db()
+        seed_models.seed()
+        print("✅ [main] Database initialized and models seeded.")
+    except Exception as e:
+        print(f"❌ [main] DB/Seed error: {e}")
+
     # 1. Initialize Firebase Admin (Control Plane) — via singleton
     try:
         initialize_firebase()
@@ -328,7 +392,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"❌ [main] Firebase Init Failed: {e}")
 
-    # 2. Sequential Self-Tests
+    # 2. Launch Background Queue Processor
+    threading.Thread(target=batch_orchestrator.process_background_queue, daemon=True).start()
+    print("🤖 [main] Background Queue Processor started.")
+
+    # 3. Sequential Self-Tests
     results = batch_orchestrator.run_all_self_tests()
 
     # 3. Start Firestore Decision Listener (non-blocking — runs in Firestore-managed thread)
@@ -361,16 +429,6 @@ async def lifespan(app: FastAPI):
 
 # Lifespan handled via app.set_lifespan (modern FastAPI) or just defined here
 app.router.lifespan_context = lifespan
-
-# ─── CORS Middleware ────────────────────────────────────────────────
-# Allow Next.js PWA (running on Vercel or locally) to hit the Ngrok tunnel
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Mount static media folders
 # /rlhf-media points to the project root directory
@@ -529,6 +587,44 @@ async def close_session(payload: SessionClosePayload, background_tasks: Backgrou
     }
 
 
+class SourceRootConfig(BaseModel):
+    source_root: str
+
+@app.post("/api/config/source-root")
+async def update_source_root(payload: SourceRootConfig):
+    """Update SOURCE_ROOT in .env.local for the background watcher."""
+    if not os.path.isdir(payload.source_root):
+        raise HTTPException(status_code=400, detail="Invalid directory path")
+    
+    env_path = os.path.join(os.path.dirname(__file__), ".env.local")
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+    
+    found = False
+    new_lines = []
+    for line in lines:
+        if line.startswith("SOURCE_ROOT="):
+            new_lines.append(f'SOURCE_ROOT="{payload.source_root}"\n')
+            found = True
+        else:
+            new_lines.append(line)
+    
+    if not found:
+        new_lines.append(f'SOURCE_ROOT="{payload.source_root}"\n')
+    
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+    
+    # Also update current environment for immediately subsequent requests
+    os.environ["SOURCE_ROOT"] = payload.source_root
+    return {"status": "success", "source_root": payload.source_root}
+
+@app.get("/api/config/source-root")
+async def get_source_root():
+    return {"source_root": os.getenv("SOURCE_ROOT", "")}
+
 # ─── Ollama Tags ────────────────────────────────────────────────────
 @app.get("/api/ollama-tags")
 async def get_ollama_tags():
@@ -537,10 +633,21 @@ async def get_ollama_tags():
         ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
         async with httpx.AsyncClient() as client:
             res = await client.get(f"{ollama_url}/api/tags", timeout=3.0)
+            models = []
             if res.status_code == 200:
                 data = res.json()
                 models = [model["name"] for model in data.get("models", [])]
-                return {"success": True, "models": models}
+            
+            # ── UI Robustness: Fallback models if local list is sparse ──
+            fallbacks = ["moondream:latest", "llava:latest", "bakllava:latest", "llama3.2-vision:latest"]
+            for f in fallbacks:
+                if f not in models:
+                    models.append(f)
+            
+            return {"success": True, "models": models}
+    except Exception as e:
+        # If Ollama is down, still return the fallbacks so the UI isn't empty
+        return {"success": True, "models": ["moondream:latest", "llava:latest"]}
     except Exception as e:
         pass
     return {"success": False, "models": ["gemma4:e4b"]}

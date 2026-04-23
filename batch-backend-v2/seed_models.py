@@ -1,13 +1,14 @@
 import sqlite3
 import os
 
-DB_PATH = "batch-backend-v2/mlops_registry.db"
+DB_PATH = os.path.join(os.path.dirname(__file__), "mlops_registry.db")
 
 def seed():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     models = [
+        ('laplacian_v2', 'heuristics', 1, 'opencv_variance'),
         ('nima_v1', 'heuristics', 1, 'musiq+clipiqa'),
         ('clip_vit_b32', 'embedding', 1, 'openai/clip'),
         ('ollama_vlm', 'vlm', 1, 'moondream:latest')

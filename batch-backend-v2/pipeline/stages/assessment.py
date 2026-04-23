@@ -71,12 +71,22 @@ class AssessmentStage(ProcessingStage):
             print(f"⚠️ [AssessmentStage] ML component init error: {e}")
 
         # --- Per-Group Assessment ---
-        # The PipelineRunner has already set ctx.current_stem and current_stem_idx
         stem = ctx.current_stem
         stem_idx = ctx.current_stem_idx
         
         if not stem:
             return
+
+        # ── Resource Management: Background Throttling ───────────
+        is_background = getattr(ctx, "priority", "foreground") == "background"
+        if is_background:
+            time.sleep(0.5)  # Yield to foreground tasks
+            import psutil
+            p = psutil.Process(os.getpid())
+            try:
+                p.nice(10)
+            except:
+                pass
 
         group_files = ctx.groups.get(stem, [])
         group_results = []
@@ -136,6 +146,17 @@ class AssessmentStage(ProcessingStage):
             if res["quality"].tier.rank > max_tier.rank:
                 max_tier = res["quality"].tier
 
+        # ── Shadow Audit Logic: The 5% Chaos Injection ──────────
+        import random
+        is_shadow_audit = False
+        if max_tier == Tier.CULL:
+            if random.random() < 0.05: # 5% Audit Rate
+                is_shadow_audit = True
+                # Use 'REJECTED' (visible tag) instead of silent CULL
+                from models import Tier as T
+                max_tier = T.REJECTED 
+                yield yield_log(f"🎲 Shadow Audit: Rescuing {stem} for recall check.", "sys")
+
         raw_master = next(
             (res for res in group_results if res["format_type"] == "RAW"),
             None,
@@ -145,6 +166,7 @@ class AssessmentStage(ProcessingStage):
         ctx.current_group_results = group_results
         ctx.current_max_tier = max_tier
         ctx.current_raw_master = raw_master
+        ctx.is_shadow_audit = is_shadow_audit
 
         # Also append to the global cross-stage accumulator for CloudSync/Results
         ctx._assessed_groups.append(

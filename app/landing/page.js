@@ -50,7 +50,8 @@ function DataGovernanceTab() {
   useEffect(() => {
     async function fetchStats() {
       try {
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
         const res = await fetch(`${baseUrl}/api/admin/dataset-stats`);
         const data = await res.json();
         setStats(data);
@@ -132,7 +133,8 @@ function DataGovernanceTab() {
             onClick={async () => {
               if (!confirm("Are you sure you want to purge annotations older than 10 days?")) return;
               try {
-                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+                const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
                 const res = await fetch(`${baseUrl}/api/annotations/ttl-cleanup`, { method: "POST" });
                 const data = await res.json();
                 alert(`Purge Complete: Deleted ${data.deleted_count} stale annotations.`);
@@ -153,7 +155,8 @@ function DataGovernanceTab() {
               // Trigger reversal
               (async () => {
                  try {
-                   const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                   const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`;
                    const res = await fetch(`${baseUrl}/api/annotations/reverse`, {
                      method: "POST",
                      headers: { "Content-Type": "application/json" },
@@ -187,7 +190,8 @@ function ModelOpsTab() {
   const [isCreating, setIsCreating] = useState(false);
   const [recommendations, setRecommendations] = useState([]);
 
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+  const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
 
   useEffect(() => {
     fetchPrompts();
@@ -556,7 +560,8 @@ function TelemetryTab() {
     let isActive = true;
     async function fetchData() {
       try {
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
         // Increase timeout for vitals during heavy RAW processing
         const [telRes, vitRes] = await Promise.all([
           fetch(`${baseUrl}/api/admin/telemetry`),
@@ -699,22 +704,19 @@ export default function AdminConsolePage() {
   const [provider,         setProvider]         = useState("gemini");
   const [geminiKey,        setGeminiKey]        = useState("");
   const [ollamaUrl,        setOllamaUrl]        = useState("http://localhost:11434");
-  const [ollamaModel,      setOllamaModel]      = useState("gemma4:e4b");
-  const [benchmarkFolder,  setBenchmarkFolder]  = useState("");
+  const [ollamaModel,      setOllamaModel]      = useState("moondream:latest");
 
   useEffect(() => {
     setProvider(localStorage.getItem("ai_provider") || "gemini");
     setGeminiKey(localStorage.getItem("gemini_key") || "");
     setOllamaUrl(localStorage.getItem("ollama_url") || process.env.NEXT_PUBLIC_OLLAMA_URL || "http://localhost:11434");
-    setOllamaModel(localStorage.getItem("ollama_model") || "gemma4:e4b");
-    setBenchmarkFolder(localStorage.getItem("benchmark_folder") || "");
+    setOllamaModel(localStorage.getItem("ollama_model") || "moondream:latest");
 
     const handleStorage = () => {
       setProvider(localStorage.getItem("ai_provider") || "gemini");
       setGeminiKey(localStorage.getItem("gemini_key") || "");
       setOllamaUrl(localStorage.getItem("ollama_url") || "http://localhost:11434");
-      setOllamaModel(localStorage.getItem("ollama_model") || "gemma4:e4b");
-      setBenchmarkFolder(localStorage.getItem("benchmark_folder") || "");
+      setOllamaModel(localStorage.getItem("ollama_model") || "moondream:latest");
     };
 
     window.addEventListener("storage", handleStorage);
@@ -785,8 +787,6 @@ export default function AdminConsolePage() {
             setOllamaUrl={setOllamaUrl}
             ollamaModel={ollamaModel}
             setOllamaModel={setOllamaModel}
-            benchmarkFolder={benchmarkFolder}
-            setBenchmarkFolder={setBenchmarkFolder}
             saveSettings={saveSettings}
           />
         )}

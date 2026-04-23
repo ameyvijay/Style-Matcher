@@ -41,7 +41,7 @@ module.exports = {
       out_file: path.join(__dirname, "logs", "frontend-out.log"),
       env: {
         NODE_ENV: "development",
-        NEXT_PUBLIC_API_URL: "http://localhost:8000"
+        NEXT_PUBLIC_API_URL: "http://127.0.0.1:8000"
       }
     }
   ]

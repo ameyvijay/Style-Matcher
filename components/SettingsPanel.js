@@ -13,27 +13,56 @@ export default function SettingsPanel({
   setOllamaUrl,
   ollamaModel,
   setOllamaModel,
-  benchmarkFolder,
-  setBenchmarkFolder,
   saveSettings 
 }) {
-  const [availableModels, setAvailableModels] = useState(["gemma4:e4b"]);
+  const [availableModels, setAvailableModels] = useState(["moondream:latest"]);
+  const [sourceRoot, setSourceRoot] = useState("");
+
+  useEffect(() => {
+    async function fetchConfig() {
+      try {
+        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+        const res = await fetch(`${baseUrl}/api/config/source-root`);
+        if (res.ok) {
+          const data = await res.json();
+          setSourceRoot(data.source_root || "");
+        }
+      } catch (e) {}
+    }
+    fetchConfig();
+  }, []);
+
+  const updateSourceRoot = async (path) => {
+    setSourceRoot(path || "");
+    try {
+      const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+      await fetch(`${baseUrl}/api/config/source-root`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_root: path })
+      });
+    } catch (e) {}
+  };
 
   useEffect(() => {
     let controller = new AbortController();
     async function fetchModels() {
       try {
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
         const res = await fetch(`${baseUrl}/api/ollama-tags`, { signal: controller.signal });
         if (!res.ok) return;
         
         const data = await res.json();
-        if (data.success && data.models.length > 0) {
+        if (data.success && data.models && data.models.length > 0) {
           setAvailableModels(data.models);
           // Auto-migrate to actual first model if current isn't valid
           if (!data.models.includes(ollamaModel)) {
-            setOllamaModel(data.models[0]);
-            saveSettings('ollama_model', data.models[0]);
+            const firstModel = data.models[0] || "moondream:latest";
+            setOllamaModel(firstModel);
+            saveSettings('ollama_model', firstModel);
           }
         }
       } catch (e) {
@@ -120,24 +149,19 @@ export default function SettingsPanel({
 
         <hr style={{ margin: "1rem 0", borderColor: "var(--glass-border)" }} />
         
-        <InputGroup label="Global Benchmark Directory" icon={Folder} description="Universal aesthetic baseline for Style Matching and Batch Processing. Drag a folder here to auto-fill.">
+        <InputGroup label="Source Library Root (Local/NAS)" icon={Folder} description="The top-level folder monitored by the background daemon. Drag your main photo library folder here.">
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <input 
               type="text"
               className="input" 
-              placeholder="/Users/shivamagent/Desktop/MyBestPhotos" 
-              value={benchmarkFolder}
-              onChange={(e) => {
-                setBenchmarkFolder(e.target.value);
-                saveSettings('benchmark_folder', e.target.value);
-              }}
+              placeholder="/Users/shivamagent/Pictures/MyLibrary" 
+              value={sourceRoot}
+              onChange={(e) => updateSourceRoot(e.target.value)}
               onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--accent-hover)'; }}
               onDragLeave={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--glass-border)'; }}
               onDrop={(e) => {
                 e.preventDefault();
                 e.currentTarget.style.borderColor = 'var(--glass-border)';
-                // MacOS Drag-and-Drop to text input is native, 
-                // but we add this handler just to ensure it captures if the OS doesn't paste automatically.
               }}
               style={{ flex: 1 }}
             />
@@ -148,19 +172,14 @@ export default function SettingsPanel({
               title="Browse Folder"
               onClick={async () => {
                 try {
-                  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                  const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+        const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
                   const res = await fetch(`${baseUrl}/api/pick-folder`);
-                  if (!res.ok) {
-                    const errData = await res.json();
-                    console.log("Folder picker:", errData.detail);
-                    return;
+                  if (res.ok) {
+                    const data = await res.json();
+                    updateSourceRoot(data.path);
                   }
-                  const data = await res.json();
-                  setBenchmarkFolder(data.path);
-                  saveSettings('benchmark_folder', data.path);
-                } catch (err) {
-                  console.error("Folder picker failed:", err);
-                }
+                } catch (err) {}
               }}
             >
               <Folder size={18} />
