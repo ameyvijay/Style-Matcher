@@ -394,6 +394,8 @@ async def lifespan(app: FastAPI):
     """Run self-tests and initialize cloud telemetry on startup."""
     # 0. Initialize Database & Seed Models
     try:
+        from pipeline.pipeline_runner import load_registry
+        load_registry()
         database.init_db()
         seed_models.seed()
         print("✅ [main] Database initialized and models seeded.")

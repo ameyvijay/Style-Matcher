@@ -65,7 +65,9 @@ def update_session_status(session_id: str, status: str, log_path: str = None):
         SESSION_REGISTRY[session_id]["status"] = status
         if log_path:
             SESSION_REGISTRY[session_id]["log_path"] = log_path
-    save_registry()
+        # Force immediate save on update
+        save_registry()
+    print(f"💾 [Registry] Session {session_id} updated to {status}")
 
 # Load immediately on import
 load_registry()
