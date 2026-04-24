@@ -37,10 +37,16 @@ export function BatchProvider({ children }) {
         const data = await res.json();
         
         if (data.active && data.session_id) {
-          console.log("🔗 Found active background session:", data.session_id);
+          console.log("🔗 Re-attaching to background session:", data.session_id);
+          
+          // Force state update to trigger log poller
           setSessionId(data.session_id);
           setIsProcessing(true);
-          // Don't clear logs, we want to see history of the silent run
+          
+          // Persist back to session storage so we don't have to wait for the next poll
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("ag_session_id", data.session_id);
+          }
         }
       } catch (err) {
         // Silent skip
