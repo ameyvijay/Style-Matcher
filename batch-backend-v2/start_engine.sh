@@ -10,7 +10,9 @@ cd "$SCRIPT_DIR"
 # 1. Load Control Plane Environment
 if [ -f .env.local ]; then
     echo "🔑 Loading .env.local..."
-    export $(grep -v '^#' .env.local | xargs)
+    set -a
+    source .env.local
+    set +a
 else
     echo "⚠️  WARNING: .env.local not found. Using system defaults."
 fi

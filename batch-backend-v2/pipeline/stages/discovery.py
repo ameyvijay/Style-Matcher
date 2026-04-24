@@ -77,11 +77,17 @@ class DiscoveryStage(ProcessingStage):
                 if ctx.session_id in ctx.abort_registry:
                     return
 
+                fname_lower = f.lower()
+                # 🛡️ Anti-Recursion: Skip files that are already engine outputs
+                if "_rlhf" in fname_lower or "_master" in fname_lower:
+                    continue
+
                 if os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS:
                     fpath = os.path.join(root, f)
                     rel_fpath = os.path.relpath(fpath, ctx.target_folder)
                     # We use relative path from target_folder as the 'identifier'
                     # but group by stem for RAW+JPEG pairing
+                    # Use base filename as stem to avoid path injection in output filenames
                     stem = Path(f).stem
                     if stem not in groups:
                         groups[stem] = []
@@ -111,9 +117,17 @@ class DiscoveryStage(ProcessingStage):
             try:
                 # Find one media in the group
                 sample_file = groups[stem][0]
-                abs_sample_path = os.path.join(ctx.target_folder, sample_file)
+                # Normalize path for robust matching
+                abs_sample_path = os.path.normpath(os.path.join(ctx.target_folder, sample_file))
                 
+                # Search by normalized path or filename + size if path varies
                 media = ctx.db.query(Media).filter(Media.file_path == abs_sample_path).first()
+                
+                # Fallback: if exact path fails, try to match by filename if unique enough
+                if not media:
+                    fname = os.path.basename(abs_sample_path)
+                    media = ctx.db.query(Media).filter(Media.file_path.like(f"%{fname}")).first()
+
                 if media:
                     inference = ctx.db.query(Inference).filter(Inference.media_id == media.id).first()
                     if inference:

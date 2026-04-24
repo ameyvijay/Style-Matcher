@@ -33,18 +33,21 @@ class MirrorManager:
         self.local_master_root = Path(local_master_root).resolve()
 
     def _get_mirrored_destination(self, source_filepath: str) -> Path:
-        source_path = Path(source_filepath).resolve()
-        
-        # Guard against arbitrary paths outside the SOURCE_ROOT
-        if self.source_root not in source_path.parents:
-            raise ValueError(f"Source path {source_path} breaches allowed source root constraint {self.source_root}.")
-            
-        rel_path = source_path.relative_to(self.source_root)
-        target_dir = self.local_master_root / rel_path.parent
-        target_dir.mkdir(parents=True, exist_ok=True)
-        
-        return target_dir / f"{source_path.stem}_master.jpg"
+        source_path = os.path.abspath(source_filepath)
+        root_path = os.path.abspath(self.source_root)
 
+        # Guard against arbitrary paths outside the SOURCE_ROOT
+        try:
+            if os.path.commonpath([root_path, source_path]) != root_path:
+                raise ValueError(f"Source path {source_path} breaches allowed source root constraint {root_path}.")
+        except ValueError as e:
+             raise ValueError(f"Constraint Violation: {e}")
+
+        rel_path = os.path.relpath(source_path, root_path)
+        target_dir = os.path.join(self.local_master_root, os.path.dirname(rel_path))
+        os.makedirs(target_dir, exist_ok=True)
+
+        return Path(os.path.join(target_dir, f"{Path(source_path).stem}_master.jpg"))
     def render_atomic(self, source_filepath: str) -> str:
         """
         Executes Stage 9 Render with Atomic Handshake.

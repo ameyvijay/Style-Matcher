@@ -191,6 +191,7 @@ export default function SwipeCard({
   onSwipeStart,      // parent notifies sync hook to mark syncing
 }) {
   const [screen, setScreen] = useState("hero");
+  const [zoomScale, setZoomScale] = useState(1);
   const cardPresentedAt = useRef(null);
 
   useEffect(() => {
@@ -649,8 +650,15 @@ export default function SwipeCard({
             transition={{ duration: 0.18 }}
             style={styles.zoomModal}
           >
-            <button style={styles.zoomCloseBtn} onClick={() => setScreen("hero")}>
-              <CloseIcon size={22} />
+            <button 
+              style={styles.zoomCloseBtn} 
+              onClick={(e) => {
+                stopProp(e);
+                setZoomScale(1);
+                setScreen("hero");
+              }}
+            >
+              <XCircle size={22} />
             </button>
 
             {/* HUD */}
@@ -667,23 +675,46 @@ export default function SwipeCard({
             </div>
 
             {/* Full image — show best available URL, sharp, no blur */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100vw", height: "100vh" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100vw", height: "100vh", overflow: "hidden" }}>
               <motion.img
                 key={imageUrl}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.22 }}
+                initial={{ opacity: 0, scale: 1 }}
+                animate={{ opacity: 1, scale: zoomScale }}
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 src={imageUrl}
                 alt={photo.filename}
                 style={{
-                    ...styles.zoomImage,
+                    maxWidth: "none",
+                    maxHeight: "90vh",
+                    objectFit: "contain",
+                    cursor: zoomScale > 1 ? "grab" : "zoom-in",
                     touchAction: "none"
                 }}
-                drag
-                dragConstraints={{ left: -500, right: 500, top: -500, bottom: 500 }}
-                dragElastic={0.1}
+                onClick={() => setZoomScale(prev => prev === 1 ? 2.5 : 1)}
+                drag={zoomScale > 1}
+                dragConstraints={{ left: -1000, right: 1000, top: -1000, bottom: 1000 }}
+                dragElastic={0.05}
                 draggable="false"
               />
+            </div>
+
+            {/* Zoom Controls Overlay */}
+            <div style={{ position: "absolute", bottom: "40px", left: "50%", transform: "translateX(-50%)", display: "flex", gap: "10px", zIndex: 320 }}>
+                <button 
+                    onClick={(e) => { stopProp(e); setZoomScale(prev => Math.max(1, prev - 0.5)); }}
+                    style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", width: "44px", height: "44px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                    -
+                </button>
+                <div style={{ background: "rgba(0,0,0,0.5)", padding: "0 15px", borderRadius: "20px", display: "flex", alignItems: "center", fontSize: "0.8rem", color: "#fff" }}>
+                    {Math.round(zoomScale * 100)}%
+                </div>
+                <button 
+                    onClick={(e) => { stopProp(e); setZoomScale(prev => Math.min(5, prev + 0.5)); }}
+                    style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", width: "44px", height: "44px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                    +
+                </button>
             </div>
 
             {/* EXIF footer */}

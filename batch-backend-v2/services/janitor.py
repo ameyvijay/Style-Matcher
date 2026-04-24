@@ -36,6 +36,49 @@ class JanitorService:
     def __init__(self, max_age_days: int = 10):
         self.max_age_days = max_age_days
 
+    async def purge_corrupted_rlhf(self, source_root: str, db_session) -> dict:
+        """
+        Surgically removes files with multiple rlhf/master tags (recursive processing artifacts).
+        """
+        import os
+        from pathlib import Path
+        from database import Media, Annotation, Inference
+        from sqlalchemy import delete
+
+        deleted_files = 0
+        deleted_records = 0
+        
+        print(f"🧹 [Janitor] Scanning for over-processed artifacts in {source_root}...")
+        
+        # 1. Physical file cleanup
+        for root, dirs, files in os.walk(source_root):
+            for f in files:
+                # Detect double-tags (e.g., _rlhf_rlhf)
+                if f.count("_rlhf") > 1 or f.count("_master") > 1:
+                    fpath = os.path.join(root, f)
+                    try:
+                        os.remove(fpath)
+                        deleted_files += 1
+                        print(f"  🗑️  Removed corrupted output: {f}")
+                    except Exception as e:
+                        print(f"  ⚠️  Failed to remove {f}: {e}")
+
+        # 2. Database cleanup (remove records pointing to non-existent or corrupted files)
+        # Find all media where path contains double tags
+        corrupted_media = db_session.query(Media).filter(
+            (Media.file_path.like("%_rlhf%_rlhf%")) | (Media.file_path.like("%_master%_master%"))
+        ).all()
+
+        for m in corrupted_media:
+            # Delete associated inferences and annotations first
+            db_session.query(Inference).filter(Inference.media_id == m.id).delete()
+            db_session.query(Annotation).filter(Annotation.media_id == m.id).delete()
+            db_session.delete(m)
+            deleted_records += 1
+
+        db_session.commit()
+        return {"files_removed": deleted_files, "records_removed": deleted_records}
+
     async def run_cleanup(self, db_session=None) -> dict:
         """
         Delete stale Firestore documents and sync local database.

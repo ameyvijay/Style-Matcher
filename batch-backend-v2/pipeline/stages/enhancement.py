@@ -117,8 +117,10 @@ class EnhancementStage(ProcessingStage):
                         ctx.tier_buckets["recoverable"] += 1
 
                     # Even for Culls, we need a proxy for the 'Second Chance' bin
+                    # Ensure stem is clean of path separators
+                    clean_stem = os.path.basename(stem)
                     rlhf_path = os.path.join(
-                        ctx.rlhf_input_dir, f"{stem}_rlhf.jpg"
+                        ctx.rlhf_input_dir, f"{clean_stem}_rlhf.jpg"
                     )
                     _enhance_file(
                         filepath, filename, res["format_type"],
@@ -140,8 +142,9 @@ class EnhancementStage(ProcessingStage):
                             ctx.tier_buckets["keeper"] += 1
 
                     # 1. RLHF Proxy (Global for all cloud-bound photos)
+                    clean_stem = os.path.basename(stem)
                     rlhf_path = os.path.join(
-                        ctx.rlhf_input_dir, f"{stem}_rlhf.jpg"
+                        ctx.rlhf_input_dir, f"{clean_stem}_rlhf.jpg"
                     )
                     _enhance_file(
                         filepath, filename, res["format_type"],
@@ -157,8 +160,9 @@ class EnhancementStage(ProcessingStage):
                         or (not raw_master)
                     )
                     if is_master:
+                        clean_stem = os.path.basename(stem)
                         enhanced_path = os.path.join(
-                            ctx.enhanced_dir, f"{stem}_master.jpg"
+                            ctx.enhanced_dir, f"{clean_stem}_master.jpg"
                         )
                         _enhance_file(
                             filepath, filename, res["format_type"],
