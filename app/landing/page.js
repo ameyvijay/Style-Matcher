@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Settings, Database, BrainCircuit, Activity } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Settings, Database, BrainCircuit, Activity, RotateCcw, Database as Db, Tag, Clock, Zap, Info, Shield, Check, Trash2, AlertTriangle, Plus, Save, Play, RefreshCw, FlaskConical, ChevronRight, CheckCircle, Maximize2, SlidersHorizontal, Sun, ScanLine, CalendarDays } from "lucide-react";
 
 // Component Imports
 import SettingsPanel from "../../components/SettingsPanel";
@@ -42,9 +42,88 @@ function ShellPanel({ title, description, placeholders }) {
   );
 }
 
+// ── Decision History Component ────────────────────────────────────────────────
+function DecisionHistory() {
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+      const res = await fetch(`${baseUrl}/api/decision/history`);
+      if (res.ok) {
+        const data = await res.json();
+        setHistory(data);
+      }
+    } catch (e) {
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  const handleReverse = async (photoHash) => {
+    if (!confirm("Reverse this decision? Photo will return to 'pending' in swiper.")) return;
+    try {
+      const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+      const res = await fetch(`${baseUrl}/api/decision/reverse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo_hash: photoHash, user_id: "admin" })
+      });
+      if (res.ok) {
+        fetchHistory();
+      }
+    } catch (e) { alert("Reversal failed"); }
+  };
+
+  if (loading) return <div style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.7rem", marginTop: "1rem" }}>Loading decision history...</div>;
+  if (history.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: "2rem", borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: "1.5rem" }}>
+      <h3 style={{ ...styles.shellTitle, fontSize: "0.9rem", marginBottom: "1rem" }}>Visual Decision Reversal</h3>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: "0.75rem" }}>
+        {history.map((item) => (
+          <div key={item.id} style={{ position: "relative", borderRadius: "10px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", aspectRatio: "1" }}>
+             <img 
+               src={item.thumbnail_url} 
+               alt={item.filename} 
+               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} 
+             />
+             <div style={{ 
+               position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", 
+               opacity: 0, 
+               display: "flex", alignItems: "center", justifyContent: "center",
+               transition: "opacity 0.2s",
+               cursor: "pointer"
+             }}
+             onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
+             onMouseLeave={(e) => e.currentTarget.style.opacity = 0}
+             onClick={() => handleReverse(item.photo_hash)}
+             >
+               <RotateCcw size={18} color="#fff" />
+             </div>
+             <div style={{ 
+               position: "absolute", top: "6px", right: "6px", 
+               width: "8px", height: "8px", borderRadius: "50%", 
+               background: item.action === "swipe_right_keeper" || item.action === "accepted" ? "#10b981" : "#f87171",
+               boxShadow: "0 0 8px rgba(0,0,0,0.5)"
+             }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Data Governance Tab ────────────────────────────────────────────────────────
 function DataGovernanceTab() {
-  const { Database: Db, Tag, Clock, RotateCcw } = require("lucide-react");
   const [stats, setStats] = useState({ golden: "—", training: "—", eval: "—", total_annotations: 0 });
 
   useEffect(() => {
@@ -133,7 +212,7 @@ function DataGovernanceTab() {
             onClick={async () => {
               if (!confirm("Are you sure you want to purge annotations older than 10 days?")) return;
               try {
-        const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+                const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
                 const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
                 const res = await fetch(`${baseUrl}/api/annotations/ttl-cleanup`, { method: "POST" });
                 const data = await res.json();
@@ -146,42 +225,16 @@ function DataGovernanceTab() {
             <Clock size={14} />
             TTL Purge (10d)
           </button>
-
-          <button 
-            style={{ ...styles.actionBtn, opacity: 1, cursor: "pointer", borderColor: "rgba(96,165,250,0.3)", color: "#60a5fa" }}
-            onClick={() => {
-              const hash = prompt("Enter Photo Hash for Reversal:");
-              if (!hash) return;
-              // Trigger reversal
-              (async () => {
-                 try {
-                   const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`;
-                   const res = await fetch(`${baseUrl}/api/annotations/reverse`, {
-                     method: "POST",
-                     headers: { "Content-Type": "application/json" },
-                     body: JSON.stringify({ photo_hash: hash })
-                   });
-                   const data = await res.json();
-                   alert(`Reversed: ${data.from} → ${data.to}`);
-                 } catch (e) {
-                   alert("Reversal Failed.");
-                 }
-              })();
-            }}
-          >
-            <RotateCcw size={14} />
-            Decision Reversal
-          </button>
         </div>
       </div>
+
+      <DecisionHistory />
     </div>
   );
 }
 
 // ── Model Ops Tab ─────────────────────────────────────────────────────────────
 function ModelOpsTab() {
-  const { Zap, RefreshCw, FlaskConical, ChevronRight, Play, CheckCircle, Clock, Save, Plus, Sparkles, AlertCircle, Info, Trash2, AlertTriangle } = require("lucide-react");
   const [prompts, setPrompts] = useState([]);
   const [activePrompt, setActivePrompt] = useState(null);
   const [isTesting, setIsTesting] = useState(false);
@@ -349,8 +402,7 @@ function ModelOpsTab() {
       const res = await fetch(`${baseUrl}/api/admin/flush-test-data`, { method: "POST" });
       const data = await res.json();
       const { details } = data;
-      alert(`Flush Complete:\n- ${details.inferences_flushed} inferences wiped\n- ${details.skips_cleared} skips cleared\n- ${details.unreviewed_media_cleared} unreviewed photos removed\n- ${details.firestore_docs_purged} cloud docs purged`);
-      fetchStats(); // Refresh dashboard
+      alert(`Flush Complete:\n- ${details.inferences_flushed} inferences wiped\n- ${details.skips_cleared} swipes cleared\n- ${details.unreviewed_media_cleared} media removed\n- ${details.firestore_docs_purged} cloud docs purged`);
     } catch (e) { alert("Flush Failed"); }
   };
 
@@ -544,7 +596,7 @@ function ModelOpsTab() {
             style={{ ...styles.actionBtn, opacity: 1, cursor: "pointer", borderColor: "rgba(248,113,113,0.4)", color: "#f87171", background: "rgba(248,113,113,0.06)" }}
           >
             <Trash2 size={14} />
-            Flush Test Inferences & Skips
+            Flush Test Inferences & Swipes
           </button>
         </div>
       </div>
@@ -554,7 +606,6 @@ function ModelOpsTab() {
 
 // ── Telemetry Tab ─────────────────────────────────────────────────────────────
 function TelemetryTab() {
-  const { Eye, Sparkles, ScanLine, MessageSquare, Cpu, HardDrive, Thermometer, Database } = require("lucide-react");
   const [telemetry, setTelemetry] = useState({ system: {}, models: {} });
   const [vitals, setVitals] = useState(null);
 

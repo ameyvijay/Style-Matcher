@@ -107,15 +107,25 @@ function SyncPulse({ syncStatus, isSyncing, latencyMs }) {
 // Shows blurhash/tiny thumbnail instantly, swaps in full cache URL when ready.
 function ProgressiveImage({ src, placeholderDataUrl, alt, style, onLoad }) {
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
   const imgRef = useRef(null);
 
-  // If src changes, reset loaded state
+  // If src changes, reset state
   useEffect(() => {
     setLoaded(false);
+    setError(false);
   }, [src]);
 
+  // Handle cached images
+  useEffect(() => {
+    if (imgRef.current?.complete && !loaded) {
+      setLoaded(true);
+      onLoad?.();
+    }
+  }, [src, loaded, onLoad]);
+
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", borderRadius: "inherit" }}>
       {/* Placeholder — tiny base64 thumbnail or gradient */}
       {placeholderDataUrl && !loaded && (
         <div
@@ -142,14 +152,24 @@ function ProgressiveImage({ src, placeholderDataUrl, alt, style, onLoad }) {
         style={{
           ...style,
           opacity: loaded ? 1 : 0,
-          transition: "opacity 0.35s ease",
+          transition: "opacity 0.4s ease-out",
+          display: error ? "none" : "block"
         }}
         draggable="false"
         onLoad={() => {
           setLoaded(true);
           onLoad?.();
         }}
+        onError={() => {
+          console.error(`[SwipeCard] Failed to load hero image: ${src}`);
+          setError(true);
+        }}
       />
+      {error && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#0a0a0a", color: "rgba(255,255,255,0.3)", fontSize: "0.7rem", textAlign: "center", padding: "1rem" }}>
+          Failed to load image. Check CORS/Network.
+        </div>
+      )}
     </div>
   );
 }

@@ -797,8 +797,13 @@ async def get_analytics():
         annotations = db.query(Annotation).order_by(Annotation.id.asc()).all()
         human_truth = {}
         for ann in annotations:
+            # Normalize labels: 'swipe_right_keeper' -> 'accepted', 'swipe_left_cull' -> 'rejected'
+            action = ann.action
+            if action == 'swipe_right_keeper': action = 'accepted'
+            if action == 'swipe_left_cull': action = 'rejected'
+            
             # Overwrite with latest annotation per media_id
-            human_truth[ann.media_id] = ann.action 
+            human_truth[ann.media_id] = action 
 
         inferences = db.query(Inference).order_by(Inference.id.asc()).all()
         model_predictions = {}
@@ -1038,6 +1043,29 @@ async def batch_process(request: BatchRequest):
 
 
 # ─── Decision Reversal ─────────────────────────────────────────────
+@app.get("/api/decision/history")
+async def get_decision_history(limit: int = 50):
+    """Return recent annotation history for visual reversal UI."""
+    db = SessionLocal()
+    try:
+        # Join Media to get file paths for thumbnails
+        history = db.query(Annotation, Media).join(Media).order_by(Annotation.timestamp.desc()).limit(limit).all()
+        
+        results = []
+        for ann, media in history:
+            results.append({
+                "id": ann.id,
+                "media_id": media.id,
+                "photo_hash": media.photo_hash,
+                "filename": os.path.basename(media.file_path),
+                "action": ann.action,
+                "timestamp": ann.timestamp.isoformat(),
+                "thumbnail_url": f"/api/media?path={media.file_path}&size=200"
+            })
+        return results
+    finally:
+        db.close()
+
 @app.post("/api/decision/reverse")
 async def reverse_decision(payload: DecisionReversal):
     """

@@ -179,7 +179,7 @@ class DiscoveryStage(ProcessingStage):
                         ctx.assessments.append(assessment)
                         completed_count += 1
 
-                        # Update summary results for correct "done" report
+                        # ── Restored: Update summary results for correct "done" report ──
                         if assessment.tier == Tier.PORTFOLIO.value:
                             ctx.result.portfolio += 1
                         elif assessment.tier == Tier.KEEPER.value:
@@ -196,7 +196,6 @@ class DiscoveryStage(ProcessingStage):
                         
                         # Re-calculate recoverable for summary
                         if assessment.tier in [Tier.CULL.value, Tier.REJECTED.value]:
-                            # Approximation for resume logic
                             if assessment.composite_score > 30:
                                 ctx.result.recoverable += 1
             except Exception as e:
