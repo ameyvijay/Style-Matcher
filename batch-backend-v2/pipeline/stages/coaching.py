@@ -94,6 +94,20 @@ class CoachingStage(ProcessingStage):
                 assessment.recovery_potential = quality.recovery_potential
                 assessment.recovery_notes = recovery_notes
                 assessment.prompt_version = _prompt_version
+                
+                # ── Persistence: Save Full Assessment JSON to DB ──────
+                try:
+                    from database import Inference
+                    import json
+                    
+                    # Update existing inference with full coaching data
+                    inference = ctx.db.query(Inference).filter(Inference.media_id == media.id).first()
+                    if inference:
+                        inference.inference_value = json.dumps(assessment.to_dict())
+                        ctx.db.commit()
+                except Exception as db_err:
+                    print(f"⚠️ Failed to persist coaching data: {db_err}")
+
                 ctx.assessments.append(assessment)
                 print(f"[{quality.composite:.0f}%] ✅")
 

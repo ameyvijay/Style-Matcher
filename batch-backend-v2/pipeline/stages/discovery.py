@@ -136,20 +136,33 @@ class DiscoveryStage(ProcessingStage):
                             pass
 
                         assessment = ImageAssessment(
-                            filename=os.path.basename(media.file_path),
-                            filepath=media.file_path,
-                            format=media.format or get_format_type(media.file_path),
+                            filename=inf_val.get("filename", os.path.basename(media.file_path)),
+                            filepath=inf_val.get("filepath", media.file_path),
+                            format=inf_val.get("format", media.format or get_format_type(media.file_path)),
                             tier=inf_val.get("tier", "review"),
                             composite_score=inf_val.get("composite_score", 0.0),
-                            sharpness_score=inf_val.get("sharpness", 0.0),
-                            aesthetic_score=inf_val.get("aesthetic", 0.0),
-                            exposure_score=inf_val.get("exposure", 0.0),
-                            reasoning=inf_val.get("semantic_description", ""),
+                            sharpness_score=inf_val.get("sharpness_score", 0.0),
+                            aesthetic_score=inf_val.get("aesthetic_score", 0.0),
+                            exposure_score=inf_val.get("exposure_score", 0.0),
+                            reasoning=inf_val.get("reasoning", ""),
+                            recovery_potential=inf_val.get("recovery_potential", ""),
+                            recovery_notes=inf_val.get("recovery_notes", ""),
                             enhanced_path=media.enhanced_path,
                             rlhf_path=media.proxy_path,
-                            exif=exif_data, 
+                            exif=inf_val.get("exif", {}), 
                             prompt_version=inference.prompt_version or "v1.0"
                         )
+                        
+                        # Reconstruct coaching sub-object if present
+                        if "coaching" in inf_val:
+                            from models import CoachingAdvice
+                            cd = inf_val["coaching"]
+                            assessment.coaching = CoachingAdvice(
+                                exposure_triangle=cd.get("exposure_triangle", ""),
+                                composition=cd.get("composition", ""),
+                                artistic=cd.get("artistic", ""),
+                                improvement_priority=cd.get("improvement_priority", "")
+                            )
                         
                         # We append directly to _assessed_groups so AssessmentStage skips it,
                         # but CloudSyncStage sees it.
