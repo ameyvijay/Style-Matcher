@@ -253,15 +253,23 @@ class EnhancementProfile:
 
 # Predefined Profiles
 ENHANCEMENT_PROFILE_MASTER = EnhancementProfile(
-    jpeg_quality=100, # 100% quality for masters
+    clahe_clip_limit=1.2,      # Very subtle contrast
+    color_boost=1.04,         # Nearly natural colors
+    contrast_boost=1.02,      # Minimal punch
+    sharpness_boost=1.02,     # Subtle - prevents "digital" look
+    jpeg_quality=98,          # Maximum fidelity
     esrgan_enabled=True,
-    max_file_size_mb=0.0
+    max_file_size_mb=4.5,
 )
 
 ENHANCEMENT_PROFILE_RLHF = EnhancementProfile(
-    jpeg_quality=90, # 90% quality for PWA/Back-end
-    esrgan_enabled=False, # Disable ESRGAN for RLHF to keep size down
-    max_file_size_mb=10.0
+    clahe_clip_limit=2.0,      # Visible but natural punch for swiper
+    color_boost=1.08,
+    contrast_boost=1.06,
+    sharpness_boost=1.03,     # Slightly more for swiper but still natural
+    jpeg_quality=92,
+    esrgan_enabled=False,      # Faster proxies
+    max_resolution_scale=0.5,  # 50% size for swiper speed
 )
 
 
