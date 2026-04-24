@@ -650,12 +650,18 @@ export default function SwipeCard({
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100vw", height: "100vh" }}>
               <motion.img
                 key={imageUrl}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.22 }}
                 src={imageUrl}
                 alt={photo.filename}
-                style={styles.zoomImage}
+                style={{
+                    ...styles.zoomImage,
+                    touchAction: "none"
+                }}
+                drag
+                dragConstraints={{ left: -500, right: 500, top: -500, bottom: 500 }}
+                dragElastic={0.1}
                 draggable="false"
               />
             </div>

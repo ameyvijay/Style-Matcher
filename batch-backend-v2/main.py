@@ -805,9 +805,10 @@ async def get_analytics():
         for inf in inferences:
             try:
                 data = json.loads(inf.inference_value)
-                is_keeper = data.get("tier") in ["portfolio", "keeper"]
-                # Overwrite with latest inference per media_id
-                model_predictions[inf.media_id] = "swipe_right_keeper" if is_keeper else "swipe_left_cull"
+                # GA Update: "review" is a keeper from the model's perspective (it passed cull)
+                is_keeper = data.get("tier") in ["portfolio", "keeper", "review"]
+                # Align with frontend labels: "accepted" or "rejected"
+                model_predictions[inf.media_id] = "accepted" if is_keeper else "rejected"
             except:
                 pass
 
@@ -816,13 +817,13 @@ async def get_analytics():
             predicted = model_predictions.get(media_id)
             if not predicted: continue
             
-            if predicted == "swipe_right_keeper" and actual == "swipe_right_keeper":
+            if predicted == "accepted" and actual == "accepted":
                 tp += 1
-            elif predicted == "swipe_right_keeper" and actual == "swipe_left_cull":
+            elif predicted == "accepted" and actual == "rejected":
                 fp += 1
-            elif predicted == "swipe_left_cull" and actual == "swipe_left_cull":
+            elif predicted == "rejected" and actual == "rejected":
                 tn += 1
-            elif predicted == "swipe_left_cull" and actual == "swipe_right_keeper":
+            elif predicted == "rejected" and actual == "accepted":
                 fn += 1
                 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
@@ -830,8 +831,8 @@ async def get_analytics():
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
         total_processed = db.query(Media).count()
-        total_accepted = list(human_truth.values()).count("swipe_right_keeper")
-        total_rejected = list(human_truth.values()).count("swipe_left_cull")
+        total_accepted = list(human_truth.values()).count("accepted")
+        total_rejected = list(human_truth.values()).count("rejected")
 
         return {
             "stats": {

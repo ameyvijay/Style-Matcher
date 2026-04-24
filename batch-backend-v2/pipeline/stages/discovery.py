@@ -37,6 +37,10 @@ class DiscoveryStage(ProcessingStage):
         return True
 
     def execute(self, ctx: PipelineContext) -> Generator[str, None, None]:
+        # ── Initialize BatchResult ───────────────────────────────────
+        # Move this to the very top so it doesn't reset resume counts
+        ctx.result = BatchResult()
+
         # ── Validate target folder ───────────────────────────────────
         if not os.path.isdir(ctx.target_folder):
             print(f"❌ Error: folder not found: {ctx.target_folder}")
@@ -185,6 +189,11 @@ class DiscoveryStage(ProcessingStage):
                         elif assessment.tier in [Tier.CULL.value, Tier.REJECTED.value]:
                             ctx.result.culled += 1
                         
+                        if assessment.enhanced_path:
+                            ctx.result.enhanced += 1
+                        if assessment.denoising_applied:
+                            ctx.result.denoised += 1
+                        
                         # Re-calculate recoverable for summary
                         if assessment.tier in [Tier.CULL.value, Tier.REJECTED.value]:
                             # Approximation for resume logic
@@ -210,8 +219,7 @@ class DiscoveryStage(ProcessingStage):
                 "sys",
             )
 
-        # ── Initialize BatchResult ───────────────────────────────────
-        ctx.result = BatchResult(total_scanned=ctx.total_files)
+        ctx.result.total_scanned = ctx.total_files
 
         # ── Prep Model Registry ──────────────────────────────────────
         model_record = (

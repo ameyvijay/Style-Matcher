@@ -208,9 +208,12 @@ export default function BatchStudio() {
                         if (data.logs && data.logs.length > 0) {
                             setLogs(data.logs);
                             const doneEvent = data.logs.find(l => l.type === "done");
-                            if (doneEvent) setResults({ metrics: doneEvent.data, mode: "batch" });
-                        }
-                    }
+                            if (doneEvent) {
+                                // Ensure the data structure matches what the UI expects (metrics sub-object)
+                                const resultsData = doneEvent.data?.total_scanned !== undefined ? { metrics: doneEvent.data } : doneEvent.data;
+                                setResults({ ...resultsData, mode: "batch" });
+                            }
+                            }                    }
                 } catch (err) {}
             };
             loadLastSession();

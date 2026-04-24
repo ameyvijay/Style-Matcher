@@ -34,20 +34,41 @@ export default function QAPage() {
 
   const handleRescue = async (photoId, batchId) => {
     try {
+      const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+      
+      // 1. Tell backend to reverse decision (Syncs SQLite + ChromaDB)
+      await fetch(`${baseUrl}/api/decision/reverse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo_id: photoId, batch_id: batchId, action: "rescue" }),
+      });
+
+      // 2. Update Firestore for UI sync
       const photoRef = doc(db, "photos", photoId);
       await updateDoc(photoRef, {
         status: "accepted",
         rescued: true,
         rescued_at: new Date().toISOString()
       });
-      // Optionally adjust batch counts if needed
     } catch (error) {
       console.error("Rescue failed:", error);
     }
   };
 
-  const handleReset = async (photoId) => {
+  const handleReset = async (photoId, batchId) => {
     try {
+      const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+      const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+
+      // 1. Tell backend to reverse decision
+      await fetch(`${baseUrl}/api/decision/reverse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo_id: photoId, batch_id: batchId, action: "reset" }),
+      });
+
+      // 2. Reset Firestore photo status to 'pending'
       const photoRef = doc(db, "photos", photoId);
       await updateDoc(photoRef, {
         status: "pending"
@@ -129,7 +150,7 @@ export default function QAPage() {
                           <Check size={20} />
                         </button>
                         <button 
-                          onClick={() => handleReset(photo.id)}
+                          onClick={() => handleReset(photo.id, photo.batch_id)}
                           className={styles.actionBtnReset}
                         >
                           <RotateCcw size={20} />
@@ -150,7 +171,7 @@ export default function QAPage() {
                     {viewMode === 'list' && (
                       <div className={styles.listActions}>
                          <button 
-                          onClick={() => handleReset(photo.id)}
+                          onClick={() => handleReset(photo.id, photo.batch_id)}
                           className={styles.listBtnReset}
                         >
                           <RotateCcw size={16} /> Reset

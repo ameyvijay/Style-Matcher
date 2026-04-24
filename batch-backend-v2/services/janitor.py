@@ -237,14 +237,12 @@ class JanitorService:
                 except:
                     continue
         
-        # 2. Delete annotations marked as 'skipped'
-        ann_stmt = delete(Annotation).where(Annotation.action == 'skipped')
+        # 2. Delete ALL annotations (reset swipes)
+        ann_stmt = delete(Annotation)
         ann_res = db_session.execute(ann_stmt)
         
-        # 3. Delete Media records that have NO annotations (Unreviewed)
-        # This fixes the "Unreviewed photos" dashboard discrepancy
-        from sqlalchemy import not_
-        media_stmt = delete(Media).where(not_(Media.annotations.any()))
+        # 3. Delete ALL Media records (complete purge)
+        media_stmt = delete(Media)
         media_res = db_session.execute(media_stmt)
 
         # 4. Clear Firestore (Best effort)
