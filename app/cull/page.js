@@ -62,12 +62,12 @@ const S = {
     justifyContent: "center", cursor: "pointer", textDecoration: "none",
   },
   swipeArea: {
-    position: "relative", width: "100%", maxWidth: "420px",
+    position: "relative", width: "100%", maxWidth: "380px",
     flex: 1, margin: "0 16px",
     maxHeight: "calc(100dvh - 130px)", minHeight: "0",
   },
   footer: {
-    width: "100%", maxWidth: "420px",
+    width: "100%", maxWidth: "380px",
     padding: "10px 16px 0", flexShrink: 0,
   },
   footerHints: { display: "flex", justifyContent: "space-between", alignItems: "center" },

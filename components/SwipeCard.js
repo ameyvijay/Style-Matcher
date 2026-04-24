@@ -188,7 +188,7 @@ export default function SwipeCard({
   const rejectOpacity = useTransform(x, [-30, -SWIPE_THRESHOLD], [0, 1]);
   
   // New: Shrink the card slightly when dragging to make it feel more manageable
-  const scale = useTransform(x, [-SWIPE_THRESHOLD, 0, SWIPE_THRESHOLD], [0.94, 1, 0.94]);
+  const scale = useTransform(x, [-SWIPE_THRESHOLD, 0, SWIPE_THRESHOLD], [0.88, 1, 0.88]);
 
   /**
    * TODO (Skip / Review Later — vertical axis):
