@@ -153,9 +153,30 @@ class DiscoveryStage(ProcessingStage):
                         
                         # We append directly to _assessed_groups so AssessmentStage skips it,
                         # but CloudSyncStage sees it.
-                        ctx._assessed_groups.append((stem, [], Tier[assessment.tier.upper()], None))
+                        try:
+                            tier_obj = Tier[assessment.tier.upper()] if assessment.tier else Tier.REVIEW
+                        except:
+                            tier_obj = Tier.REVIEW
+
+                        ctx._assessed_groups.append((stem, [], tier_obj, None))
                         ctx.assessments.append(assessment)
                         completed_count += 1
+
+                        # Update summary results for correct "done" report
+                        if assessment.tier == Tier.PORTFOLIO.value:
+                            ctx.result.portfolio += 1
+                        elif assessment.tier == Tier.KEEPER.value:
+                            ctx.result.keepers += 1
+                        elif assessment.tier == Tier.REVIEW.value:
+                            ctx.result.review += 1
+                        elif assessment.tier in [Tier.CULL.value, Tier.REJECTED.value]:
+                            ctx.result.culled += 1
+                        
+                        # Re-calculate recoverable for summary
+                        if assessment.tier in [Tier.CULL.value, Tier.REJECTED.value]:
+                            # Approximation for resume logic
+                            if assessment.composite_score > 30:
+                                ctx.result.recoverable += 1
             except Exception as e:
                 print(f"⚠️ [Discovery] Resume check failed for {stem}: {e}")
 

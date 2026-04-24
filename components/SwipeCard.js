@@ -186,6 +186,9 @@ export default function SwipeCard({
   const cardOpacity = useTransform(x, [-260, -190, 0, 190, 260], [0, 1, 1, 1, 0]);
   const acceptOpacity = useTransform(x, [30, SWIPE_THRESHOLD], [0, 1]);
   const rejectOpacity = useTransform(x, [-30, -SWIPE_THRESHOLD], [0, 1]);
+  
+  // New: Shrink the card slightly when dragging to make it feel more manageable
+  const scale = useTransform(x, [-SWIPE_THRESHOLD, 0, SWIPE_THRESHOLD], [0.94, 1, 0.94]);
 
   /**
    * TODO (Skip / Review Later — vertical axis):
@@ -353,7 +356,7 @@ export default function SwipeCard({
           y: isTop ? y : stackY,
           rotate: isTop ? rotate : 0,
           opacity: isTop ? cardOpacity : 1,
-          scale: stackScale,
+          scale: isTop ? scale : stackScale,
           touchAction: "none",
           ...styles.cardWrapper,
           zIndex: 10 - stackOffset,

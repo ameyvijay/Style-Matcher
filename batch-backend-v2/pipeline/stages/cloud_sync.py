@@ -67,7 +67,10 @@ class CloudSyncStage(ProcessingStage):
             for a in ctx.assessments
             if a.tier in [Tier.KEEPER.value, Tier.REVIEW.value]
         ]
-        cull = [a for a in ctx.assessments if a.tier == Tier.CULL.value]
+        cull = [
+            a for a in ctx.assessments 
+            if a.tier in [Tier.CULL.value, Tier.REJECTED.value]
+        ]
 
         manifest_dir = os.path.dirname(os.path.dirname(__file__))
         manifest_path, manifest_data = generate_doppler_manifest(
@@ -93,49 +96,62 @@ class CloudSyncStage(ProcessingStage):
 
             # Serialize ImageAssessment → dict for Firestore
             manifest_photos = []
+            # Use manifest_data['photos'] which might be dicts now if generate_doppler_manifest was updated
             for p in manifest_data["photos"]:
+                # Ensure we handle both objects and dicts for flexibility
+                get_attr = lambda obj, key, default="": getattr(obj, key, default) if not isinstance(obj, dict) else obj.get(key, default)
+                
                 coaching_dict = {}
-                if hasattr(p, "coaching") and p.coaching:
-                    coaching_obj = p.coaching
+                p_coaching = get_attr(p, "coaching", None)
+                if p_coaching:
                     coaching_dict = {
-                        "exposure_triangle": getattr(
-                            coaching_obj, "exposure_triangle", ""
-                        ),
-                        "composition": getattr(coaching_obj, "composition", ""),
-                        "artistic": getattr(coaching_obj, "artistic", ""),
-                        "improvement_priority": getattr(
-                            coaching_obj, "improvement_priority", ""
-                        ),
+                        "exposure_triangle": get_attr(p_coaching, "exposure_triangle", ""),
+                        "composition": get_attr(p_coaching, "composition", ""),
+                        "artistic": get_attr(p_coaching, "artistic", ""),
+                        "improvement_priority": get_attr(p_coaching, "improvement_priority", ""),
                     }
+
                 manifest_photos.append({
                     # ── Identity ────────────────────────────────────
-                    "filename": p.filename,
-                    "filepath": p.filepath,
-                    "enhanced_path": p.enhanced_path,
-                    "rlhf_path": p.rlhf_path,
+                    "filename": get_attr(p, "filename"),
+                    "filepath": get_attr(p, "filepath"),
+                    "enhanced_path": get_attr(p, "enhanced_path"),
+                    "rlhf_path": get_attr(p, "rlhf_path"),
                     # ── AI Scores ───────────────────────────────────
-                    "composite_score": p.composite_score,
-                    "sharpness_score": p.sharpness_score,
-                    "aesthetic_score": p.aesthetic_score,
-                    "exposure_score": p.exposure_score,
+                    "composite_score": get_attr(p, "composite_score", 0.0),
+                    "sharpness_score": get_attr(p, "sharpness_score", 0.0),
+                    "aesthetic_score": get_attr(p, "aesthetic_score", 0.0),
+                    "exposure_score": get_attr(p, "exposure_score", 0.0),
                     # ── Classification ──────────────────────────────
-                    "tier": p.tier,
-                    "genre": getattr(p, "genre", "general") or "general",
+                    "tier": get_attr(p, "tier"),
+                    "genre": get_attr(p, "genre", "general") or "general",
                     # ── AI Coach ────────────────────────────────────
-                    "reasoning": getattr(p, "reasoning", ""),
+                    "reasoning": get_attr(p, "reasoning", ""),
                     "coaching": coaching_dict,
-                    "prompt_version": (
-                        getattr(p, "prompt_version", "v1.0") or "v1.0"
-                    ),
+                    "prompt_version": get_attr(p, "prompt_version", "v1.0") or "v1.0",
                     # ── EXIF ────────────────────────────────────────
-                    "exif": p.exif if isinstance(p.exif, dict) else {},
+                    "exif": get_attr(p, "exif", {}),
                 })
 
             yield yield_log(
                 f"Syncing {len(manifest_photos)} photos to cloud plane...",
                 "sys",
             )
-            if bridge.push_doppler_manifest(batch_id, manifest_photos):
+            
+            # Use a list to accumulate progress events from the callback
+            sync_events = []
+            def sync_callback(current, total, filename):
+                if current % 10 == 0 or current == total:
+                    sync_events.append(yield_log(
+                        f"Cloud Handshake: {current}/{total} ({filename})", 
+                        "progress"
+                    ))
+
+            if bridge.push_doppler_manifest(batch_id, manifest_photos, on_progress=sync_callback):
+                # Drain accumulated events
+                for event in sync_events:
+                    yield event
+
                 yield yield_log(
                     f"✅ Cloud Manifest Sync Complete. Batch ID: {batch_id}",
                     "sys",
@@ -227,7 +243,7 @@ def generate_doppler_manifest(
     manifest_data = {
         "generated_at": time.time(),
         "total_items": len(interleaved_queue),
-        "photos": interleaved_queue,
+        "photos": [p.to_dict() if hasattr(p, 'to_dict') else p for p in interleaved_queue],
     }
 
     try:

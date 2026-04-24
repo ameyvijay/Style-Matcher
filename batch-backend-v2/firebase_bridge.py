@@ -128,7 +128,7 @@ class FirebaseBridge:
             } for p in photos
         ])
 
-    def push_doppler_manifest(self, batch_id: str, manifest_photos: list[dict]) -> bool:
+    def push_doppler_manifest(self, batch_id: str, manifest_photos: list[dict], on_progress: Optional[Callable[[int, int, str], None]] = None) -> bool:
         """
         GA Transition: Mass-injects the 70/30 fatigue-optimized manifest into Firestore.
         Uses 500-op chunked loading to respect Firestore limits.
@@ -137,6 +137,7 @@ class FirebaseBridge:
             return False
 
         print(f"[firebase_bridge] Initializing Cloud Ingestion for Batch: {batch_id}")
+        total = len(manifest_photos)
         
         # 1. Initialize Batch Singleton
         batch_ref = self.db.collection('batches').document(batch_id)
@@ -144,17 +145,21 @@ class FirebaseBridge:
             'batch_id': batch_id,
             'status': 'ingesting',
             'timestamp': firestore.SERVER_TIMESTAMP,
-            'total_photos': len(manifest_photos),
+            'total_photos': total,
             'processed_count': 0
         })
 
         # 2. Chunked Firestore Injection (500-op limit)
         CHUNK_SIZE = 450 # Safety margin below 500
-        for i in range(0, len(manifest_photos), CHUNK_SIZE):
+        for i in range(0, total, CHUNK_SIZE):
             chunk = manifest_photos[i:i + CHUNK_SIZE]
             firestore_batch = self.db.batch()
             
             for j, photo in enumerate(chunk):
+                current_idx = i + j + 1
+                if on_progress:
+                    on_progress(current_idx, total, photo['filename'])
+
                 # Ensure we have a valid RLHF URL (Physical upload to Storage)
                 rlhf_url = ""
                 

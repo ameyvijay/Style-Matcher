@@ -58,7 +58,10 @@ export function BatchProvider({ children }) {
     if (!isProcessing || !sessionId) return;
     
     let isMounted = true;
-    let linesSeen = logs.length;
+    // CRITICAL: On first run after refresh/reattach, linesSeen should be 0
+    // so we get the full history of the background run. 
+    // Subsequent polls will update this value.
+    let linesSeen = 0; 
     let lastLogTime = Date.now();
 
     const poll = async () => {
@@ -72,10 +75,8 @@ export function BatchProvider({ children }) {
         if (isMounted && data.logs.length > 0) {
           lastLogTime = Date.now();
           setLogs(prev => {
-            // Check for duplicates before appending
-            const existingCount = prev.length;
-            if (data.total <= existingCount) return prev;
-            return [...prev, ...data.logs];
+            if (linesSeen === 0) return data.logs; // First load: replace with history
+            return [...prev, ...data.logs]; // Subsequent: append
           });
           linesSeen = data.total;
 

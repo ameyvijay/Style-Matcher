@@ -85,6 +85,23 @@ export default function LoginPage() {
         <p className={styles.footerText}>
           Powered by Antigravity v2.1
         </p>
+
+        {process.env.NODE_ENV === 'development' && (
+          <div style={{
+            marginTop: '2rem',
+            padding: '1rem',
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: '12px',
+            border: '1px solid rgba(255,255,255,0.08)',
+            fontSize: '0.75rem',
+            color: 'rgba(255,255,255,0.4)',
+            maxWidth: '280px',
+            textAlign: 'center'
+          }}>
+            <p style={{ marginBottom: '0.5rem', fontWeight: '600' }}>📱 Mobile Connection Tip</p>
+            To use the M4 compute engine from your phone, ensure your mobile is on the same WiFi and set <code style={{ color: '#60a5fa' }}>NEXT_PUBLIC_API_URL</code> to your Mac's local IP (e.g. 192.168.x.x).
+          </div>
+        )}
       </motion.div>
     </main>
   );

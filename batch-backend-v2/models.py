@@ -300,6 +300,36 @@ class ImageAssessment:
     processing_time: float = 0.0
     prompt_version: str = "v1.0"   # AI Coach prompt version that produced this assessment
 
+    def to_dict(self):
+        """Standard serialization for JSON logging and API responses."""
+        return {
+            "filename": self.filename,
+            "filepath": self.filepath,
+            "format": self.format,
+            "tier": self.tier,
+            "genre": self.genre,
+            "composite_score": self.composite_score,
+            "sharpness_score": self.sharpness_score,
+            "aesthetic_score": self.aesthetic_score,
+            "exposure_score": self.exposure_score,
+            "reasoning": self.reasoning,
+            "technical_flaws": self.technical_flaws,
+            "recovery_potential": self.recovery_potential,
+            "recovery_notes": self.recovery_notes,
+            "denoising_applied": self.denoising_applied,
+            "enhanced_path": self.enhanced_path,
+            "rlhf_path": self.rlhf_path,
+            "exif": self.exif,
+            "processing_time": self.processing_time,
+            "prompt_version": self.prompt_version,
+            "coaching": {
+                "exposure_triangle": getattr(self.coaching, "exposure_triangle", ""),
+                "composition": getattr(self.coaching, "composition", ""),
+                "artistic": getattr(self.coaching, "artistic", ""),
+                "improvement_priority": getattr(self.coaching, "improvement_priority", "")
+            } if self.coaching else {}
+        }
+
 
 # ─── Per-File Result (internal pipeline) ──────────────────────────────
 @dataclass
