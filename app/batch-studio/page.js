@@ -182,7 +182,40 @@ export default function BatchStudio() {
             } catch (e) {}
         };
         fetchSourceRoot();
-    }, []);
+
+        // ── Re-attach or Load Last Session ───────────────────────────
+        if (!isProcessing) {
+            const loadLastSession = async () => {
+                try {
+                    const hostname = typeof window !== 'undefined' ? (window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname) : '127.0.0.1';
+                    const baseUrl = (process.env.NEXT_PUBLIC_API_URL || `http://${hostname}:8000`).trim();
+                    
+                    // 1. Check for active session first
+                    const activeRes = await fetch(`${baseUrl}/api/batch/active`);
+                    if (activeRes.ok) {
+                        const activeData = await activeRes.json();
+                        if (activeData.active) {
+                            setSessionId(activeData.session_id);
+                            setIsProcessing(true);
+                            return;
+                        }
+                    }
+
+                    // 2. Otherwise, check for the most recent completed session in registry
+                    const regRes = await fetch(`${baseUrl}/api/logs/manual_resume_07`);
+                    if (regRes.ok) {
+                        const data = await regRes.json();
+                        if (data.logs && data.logs.length > 0) {
+                            setLogs(data.logs);
+                            const doneEvent = data.logs.find(l => l.type === "done");
+                            if (doneEvent) setResults({ metrics: doneEvent.data, mode: "batch" });
+                        }
+                    }
+                } catch (err) {}
+            };
+            loadLastSession();
+        }
+    }, [isProcessing, setLogs, setResults, setSessionId, setIsProcessing, setTargetFolder]);
 
     const updateSourceRoot = async (path) => {
         setTargetFolder(path);
