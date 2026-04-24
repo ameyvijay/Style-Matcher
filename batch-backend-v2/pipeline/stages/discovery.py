@@ -107,17 +107,34 @@ class DiscoveryStage(ProcessingStage):
             try:
                 # Find one media in the group
                 sample_file = groups[stem][0]
-                media = ctx.db.query(Media).filter(Media.file_path.like(f"%{sample_file}")).first()
+                abs_sample_path = os.path.join(ctx.target_folder, sample_file)
+                
+                media = ctx.db.query(Media).filter(Media.file_path == abs_sample_path).first()
                 if media:
                     inference = ctx.db.query(Inference).filter(Inference.media_id == media.id).first()
                     if inference:
                         is_completed = True
                         
                         # Reconstruct ImageAssessment from DB for CloudSyncStage
-                        # We need this to ensure the "Swiper" gets the old data too.
-                        # Note: This is a simplified reconstruction for MVP.
-                        inf_val = json.loads(inference.inference_value) if (inference.inference_value and inference.inference_value.startswith('{')) else {}
+                        inf_val = {}
+                        if inference.inference_value:
+                            try:
+                                if inference.inference_value.startswith('{'):
+                                    inf_val = json.loads(inference.inference_value)
+                                else:
+                                    # Handle legacy or simple string inferences
+                                    inf_val = {"tier": inference.inference_value}
+                            except:
+                                inf_val = {"tier": "review"}
                         
+                        # Reconstruct EXIF safely
+                        exif_data = {}
+                        try:
+                            # Try to extract EXIF if saved in inf_val or if we want to re-read it
+                            exif_data = inf_val.get("exif", {})
+                        except:
+                            pass
+
                         assessment = ImageAssessment(
                             filename=os.path.basename(media.file_path),
                             filepath=media.file_path,
@@ -130,7 +147,7 @@ class DiscoveryStage(ProcessingStage):
                             reasoning=inf_val.get("semantic_description", ""),
                             enhanced_path=media.enhanced_path,
                             rlhf_path=media.proxy_path,
-                            exif=media.file_path, # Temporary placeholder
+                            exif=exif_data, 
                             prompt_version=inference.prompt_version or "v1.0"
                         )
                         
